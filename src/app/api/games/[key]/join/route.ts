@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server"
 
 import { joinGame } from "@/lib/game-service"
+import { clientRateKey, isRateLimited } from "@/lib/rate-limit"
 import { rememberSession } from "@/lib/session"
 import { gameKeySchema, joinGameSchema } from "@/lib/validation"
+
+/** Открытый стол в интернет: не даём перебирать ключи столов со скоростью автомата. */
+const JOIN_LIMIT = { requests: 30, windowMs: 60_000 }
 
 type JoinRouteContext = {
   params: Promise<{ key: string }>
 }
 
 export async function POST(request: Request, context: JoinRouteContext) {
+  if (isRateLimited(clientRateKey(request, "games-join"), JOIN_LIMIT.requests, JOIN_LIMIT.windowMs)) {
+    return NextResponse.json(
+      { error: "Слишком много запросов — подожди минуту" },
+      { status: 429 },
+    )
+  }
+
   const { key: rawKey } = await context.params
   const parsedKey = gameKeySchema.safeParse(rawKey)
   if (!parsedKey.success) {

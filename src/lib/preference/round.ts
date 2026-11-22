@@ -176,6 +176,9 @@ function applyBid(
   if (action.level < MIN_LEVEL || action.level > MAX_LEVEL) {
     return fail(`Заказ — от ${MIN_LEVEL} до ${MAX_LEVEL} взяток`)
   }
+  if (action.trump === "NT") {
+    return fail("Без козыря не заказывают — в торговле только масти")
+  }
 
   const bid: Bid = { level: action.level, trump: action.trump }
   if (state.highest && bidStrength(bid) <= bidStrength(state.highest.bid)) {
@@ -255,6 +258,9 @@ function applyDeclare(
 
   const highest = state.highest
   if (!highest) return fail("Не было заказа")
+  if (action.contract === "misere" && highest.bid.level !== MIN_LEVEL) {
+    return fail("Мизер объявляют только при заказе шестой игры")
+  }
 
   const next = structuredClone(state)
   next.discard = [...action.discard]

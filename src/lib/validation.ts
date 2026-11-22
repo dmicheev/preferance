@@ -25,9 +25,16 @@ export function normalizeNickname(raw: string): string {
     .filter((char) => NICKNAME_ALLOWED.test(char))
     .join("")
     .replace(/\s+/g, " ")
-    .trimStart()
+    .trim()
 
   return cleaned.slice(0, NICKNAME_MAX_LENGTH)
+}
+
+/** «Компьютер…» зарезервировано за ботами: иначе человек заберёт их аккаунт. */
+const RESERVED_NICKNAME = /^компьютер/ui
+
+export function isReservedNickname(nickname: string): boolean {
+  return RESERVED_NICKNAME.test(nickname.trim())
 }
 
 /** Ключ стола: только заглавные буквы и цифры, без похожих символов. */
@@ -46,6 +53,9 @@ export const nicknameSchema = z
       value.length >= NICKNAME_MIN_LENGTH && value.length <= NICKNAME_MAX_LENGTH,
     { message: `Ник — от ${NICKNAME_MIN_LENGTH} до ${NICKNAME_MAX_LENGTH} символов` },
   )
+  .refine((value) => !isReservedNickname(value), {
+    message: "Ник «Компьютер…» занят за ботами — выбери себе другой",
+  })
 
 export const gameKeySchema = z.string().transform(normalizeGameKey).refine(
   (value) => value.length === GAME_KEY_LENGTH,

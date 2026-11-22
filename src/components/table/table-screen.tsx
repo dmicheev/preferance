@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Candle } from "@/components/candle"
 import { HandFan } from "@/components/cards/hand-fan"
-import { settingsSummary, statusLabel } from "@/lib/format"
+import { bidText, settingsSummary, statusLabel } from "@/lib/format"
 import type { Card, Trump } from "@/lib/preference/cards"
 import type { Seat } from "@/lib/preference/round"
 import { rulesetSummary } from "@/lib/preference/score"
@@ -67,6 +67,9 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
     const handleGameState = (snapshot: GameSnapshot) => {
       setGame(snapshot)
       setGameError(null)
+      // Итог раздачи подтягиваем и из снапшота: кто-то заходит в паузу готовности,
+      // когда game:round-result давно прошёл — «считаем взятки…» не должно висеть.
+      setLastResult(snapshot.lastRoundResult ?? null)
       // Снос живёт только в фазе прикупа.
       if (snapshot.round?.phase !== "declaring") setDiscardPick([])
     }
@@ -120,6 +123,9 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
       socket.off("chat:new", handleMessage)
       socket.off("chat:error", handleChatError)
       socket.off("room:error", handleRoomError)
+      // Сокет живёт дольше экрана, но покидать комнату надо сразу:
+      // иначе уходим в зал и до закрытия вкладки числимся «за столом».
+      socket.emit("room:leave", { key: view.key })
     }
   }, [myUserId, view.key])
 
@@ -289,6 +295,46 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
     [round, discardPick],
   )
 
+  /** Реплики над местами: заказ игры или пас — как разговор за столом. */
+  const balloons = useMemo(() => {
+    const result: Partial<Record<TrickPosition, { text: string; tone: "bid" | "pass" }>> = {}
+    if (!game || !round) return result
+
+    const forSeat = (seat: number | null | undefined) => {
+      if (seat === null || seat === undefined) return null
+      if (round.phase === "bidding") {
+        const bid = round.bids[seat as Seat]
+        if (bid === "pass") return { text: "пас", tone: "pass" as const }
+        if (bid) return { text: bidText(bid), tone: "bid" as const }
+        return null
+      }
+      // После торговли заказ играющего висит над его местом до конца раздачи.
+      if (round.declarer !== seat) return null
+      if (round.contract) {
+        if (round.contract.kind === "misere") return { text: "мизер", tone: "bid" as const }
+        if (round.contract.kind === "game") {
+          return {
+            text: bidText({ level: round.contract.level, trump: round.contract.trump }),
+            tone: "bid" as const,
+          }
+        }
+        return null
+      }
+      // Фаза сноса: контракт ещё не подтверждён — показываем выигрышный заказ.
+      return round.highest && round.highest.seat === seat
+        ? { text: bidText(round.highest.bid), tone: "bid" as const }
+        : null
+    }
+
+    const left = forSeat(layout.left?.seat)
+    const right = forSeat(layout.right?.seat)
+    const self = forSeat(layout.bottom?.seat)
+    if (left) result.left = left
+    if (right) result.right = right
+    if (self) result.self = self
+    return result
+  }, [game, round, layout])
+
   const handNote = !game
     ? null
     : game.status === "LOBBY"
@@ -310,6 +356,10 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
   }
 
   const onlineCount = room?.onlineCount ?? 0
+  // Статус берём из room:state, если он уже приходил: серверный view.status
+  // застыл на момент рендера и после старта партии показывает «Лобби».
+  const tableStatus = room?.status ?? view.status
+  const lobbyEditable = layout.meIsHost && tableStatus === "LOBBY"
   const dealNumber = game ? game.roundsPlayed + (round ? 1 : 0) : 0
 
   // Номер места для посадки бота: на пустом месте игрока нет, считаем по кругу от своего.
@@ -342,7 +392,7 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
               {copied ? "✓" : "⧉"}
             </button>
           </span>
-          <span className="chip chip--status">{statusLabel(view.status)}</span>
+          <span className="chip chip--status">{statusLabel(tableStatus)}</span>
           <span className="chip">{settingsSummary(view.settings)}</span>
           <span className="chip chip--rules" title="Очки за игры, мизер и висты">
             {rulesetSummary(view.settings.rules)}
@@ -419,10 +469,12 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
             isBot={layout.left?.isBot ?? false}
             botLevel={layout.left?.botLevel ?? null}
             isHost={layout.meIsHost}
+            canEdit={lobbyEditable}
             seat={leftSeatNum}
             onBotSeat={sendBotSeat}
             onBotRemove={sendBotRemove}
             backs={backsFor(layout.left?.seat ?? -1, layout.left !== null)}
+            balloon={balloons.left ?? null}
           />
 
           <SeatPlate
@@ -437,10 +489,12 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
             isBot={layout.right?.isBot ?? false}
             botLevel={layout.right?.botLevel ?? null}
             isHost={layout.meIsHost}
+            canEdit={lobbyEditable}
             seat={rightSeatNum}
             onBotSeat={sendBotSeat}
             onBotRemove={sendBotRemove}
             backs={backsFor(layout.right?.seat ?? -1, layout.right !== null)}
+            balloon={balloons.right ?? null}
           />
 
           <SeatPlate
@@ -457,8 +511,16 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
             isMe={layout.bottomIsMe}
             isHost={layout.meIsHost}
             backs={0}
+            balloon={balloons.self ?? null}
           />
         </div>
+
+        {/* Ошибки хода — над доком действий: это игровой фидбек, а не чат. */}
+        {gameError ? (
+          <p className="form-error" role="alert">
+            {gameError}
+          </p>
+        ) : null}
 
         {game && game.status !== "FINISHED" ? (
           <GameActions
@@ -487,7 +549,7 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
         messages={messages}
         myNickname={myNickname}
         onlineCount={onlineCount}
-        error={chatError ?? gameError ?? roomError}
+        error={chatError ?? roomError}
         disabled={!myUserId}
         onSend={sendChat}
       />

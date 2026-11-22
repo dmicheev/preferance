@@ -10,6 +10,7 @@ import {
   BULLET_OPTIONS,
   GAME_KEY_LENGTH,
   ROUNDS_OPTIONS,
+  isReservedNickname,
   normalizeGameKey,
   normalizeNickname,
 } from "@/lib/validation"
@@ -75,6 +76,10 @@ export function Hall() {
       setError("Ник — минимум 2 символа")
       return
     }
+    if (isReservedNickname(value)) {
+      setError("Ник «Компьютер…» занят за ботами")
+      return
+    }
 
     setBusy(true)
     setError(null)
@@ -123,6 +128,10 @@ export function Hall() {
     }
     if (value.length < 2) {
       setJoinError("Ник — минимум 2 символа")
+      return
+    }
+    if (isReservedNickname(value)) {
+      setJoinError("Ник «Компьютер…» занят за ботами")
       return
     }
 

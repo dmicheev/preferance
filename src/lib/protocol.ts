@@ -129,6 +129,8 @@ export type GameSnapshot = {
   myLegalMoves: Card[]
   /** Кто подтвердил готовность к следующей раздаче. */
   readyUserIds: string[]
+  /** Итог последней записанной раздачи: чтобы опоздавшие увидели паузу с итогами. */
+  lastRoundResult: RoundResultView | null
   standings: StandingView[] | null
 }
 
@@ -168,6 +170,7 @@ export type GameBotRemovePayload = { seat: number }
 
 export type ClientToServerEvents = {
   "room:join": (payload: JoinRoomPayload) => void
+  "room:leave": (payload: JoinRoomPayload) => void
   "chat:send": (payload: SendChatPayload) => void
   "game:start": (payload: GameStartPayload) => void
   "game:bid": (payload: GameBidPayload) => void

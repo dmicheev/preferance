@@ -9,6 +9,9 @@ import {
   PLAYER_COUNT,
 } from "@/lib/preference/constants"
 import { TRUMP_LABEL, TRUMPS, type Trump } from "@/lib/preference/cards"
+
+/** В торговле заказывают только масти: без козыря в преферансе не играют. */
+const BID_TRUMPS = TRUMPS.filter((trump) => trump !== "NT")
 import { bidStrength, type Seat } from "@/lib/preference/round"
 import type { GameSnapshot, RoundResultView } from "@/lib/protocol"
 
@@ -150,7 +153,7 @@ export function GameActions({
               ))}
             </div>
             <div className="actions__row" role="group" aria-label="Масть заказа">
-              {TRUMPS.map((trump) => (
+              {BID_TRUMPS.map((trump) => (
                 <button
                   key={trump}
                   type="button"
@@ -159,7 +162,7 @@ export function GameActions({
                   disabled={bidLevel * 10 + TRUMP_OFFSET[trump] <= floor}
                   onClick={() => setBidTrump(trump)}
                 >
-                  {trump === "NT" ? "БК" : SUIT_SHORT[trump]}
+                  {SUIT_SHORT[trump]}
                 </button>
               ))}
             </div>
@@ -170,8 +173,7 @@ export function GameActions({
                 disabled={chosen <= floor}
                 onClick={() => onBid(bidLevel, bidTrump)}
               >
-                Заказать {bidLevel}
-                {bidTrump === "NT" ? " БК" : ` ${SUIT_SHORT[bidTrump]}`}
+                Заказать {bidLevel} {SUIT_SHORT[bidTrump as Exclude<Trump, "NT">]}
               </button>
               <button className="button button--ghost" type="button" onClick={onPass}>
                 Пас
@@ -216,7 +218,12 @@ export function GameActions({
               <button
                 className="button button--ghost"
                 type="button"
-                disabled={discardPick.length !== 2}
+                disabled={discardPick.length !== 2 || round.highest?.bid.level !== MIN_LEVEL}
+                title={
+                  round.highest?.bid.level !== MIN_LEVEL
+                    ? "мизер объявляют только с шестёрки"
+                    : undefined
+                }
                 onClick={() => onDeclare("misere", discardPick)}
               >
                 Мизер

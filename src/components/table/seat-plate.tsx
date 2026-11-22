@@ -28,12 +28,16 @@ export type SeatPlateProps = {
   botLevel?: string | null
   /** Хозяин ли текущий пользователь (для кнопки посадки бота). */
   isHost?: boolean
+  /** Стол ещё в лобби: можно сажать и убирать ботов. */
+  canEdit?: boolean
   /** Посадить бота на это место. */
   onBotSeat?: (seat: number, level: string) => void
   /** Убрать бота с этого места. */
   onBotRemove?: (seat: number) => void
   /** Номер места (0–2). */
   seat?: number
+  /** Реплика над табличкой: заказ игры или пас. */
+  balloon?: { text: string; tone: "bid" | "pass" } | null
 }
 
 export function SeatPlate({
@@ -46,9 +50,11 @@ export function SeatPlate({
   isBot = false,
   botLevel = null,
   isHost = false,
+  canEdit = false,
   onBotSeat,
   onBotRemove,
   seat = -1,
+  balloon = null,
 }: SeatPlateProps) {
   const empty = nickname === null
   const initial = nickname ? Array.from(nickname)[0]?.toUpperCase() : "·"
@@ -67,7 +73,7 @@ export function SeatPlate({
     else presence = "не в сети"
   }
 
-  const isEmptyBotSeat = empty && isHost && position !== "dummy" && onBotSeat
+  const isEmptyBotSeat = empty && isHost && canEdit && position !== "dummy" && onBotSeat
 
   return (
     <div
@@ -92,6 +98,11 @@ export function SeatPlate({
       ) : null}
 
       <div className="seat__plate">
+        {balloon ? (
+          <div className="seat__balloon" data-tone={balloon.tone} role="status" key={balloon.text}>
+            {balloon.text}
+          </div>
+        ) : null}
         <span className="seat__avatar">{initial}</span>
         <span className="seat__name">
           {isBot ? "💻 " : ""}{nickname ?? "свободное место"}
@@ -133,7 +144,7 @@ export function SeatPlate({
           </div>
         )}
 
-        {!empty && isBot && isHost && onBotRemove && position !== "dummy" ? (
+        {!empty && isBot && isHost && canEdit && onBotRemove && position !== "dummy" ? (
           <button
             className="button button--small button--ghost"
             type="button"

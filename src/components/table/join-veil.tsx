@@ -6,7 +6,7 @@ import { useState, type FormEvent } from "react"
 import { settingsSummary } from "@/lib/format"
 import { rulesetSummary } from "@/lib/preference/score"
 import { NICKNAME_MAX_LENGTH, type GameSettingsView } from "@/lib/protocol"
-import { normalizeNickname } from "@/lib/validation"
+import { isReservedNickname, normalizeNickname } from "@/lib/validation"
 
 type JoinVeilProps = {
   gameKey: string
@@ -25,6 +25,10 @@ export function JoinVeil({ gameKey, settings, seatsTaken }: JoinVeilProps) {
     const value = normalizeNickname(nickname).trim()
     if (value.length < 2) {
       setError("Ник — минимум 2 символа")
+      return
+    }
+    if (isReservedNickname(value)) {
+      setError("Ник «Компьютер…» занят за ботами")
       return
     }
 

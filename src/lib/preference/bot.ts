@@ -4,6 +4,7 @@
 import {
   cardStrength,
   compareHandCards,
+  rankStrength,
   type Card,
   type Suit,
   type Trump,
@@ -75,7 +76,6 @@ function suitSuitability(hand: Card[], suit: Trump): number {
   const { count, top } = trumpInfo(hand, suit)
   let score = count * 3
   if (top !== null) score += top / 10
-  // ITEN: для без козыря нечем оценить — отдельно
   return score
 }
 
@@ -110,7 +110,7 @@ function cardToWin(trick: TrickCard[], hand: Card[], ledSuit: Suit, trump: Trump
     }
   }
   if (candidates.length > 0) {
-    // Минимально достаточная:最弱 из старших
+    // Минимально достаточная: слабейшая из старших
     candidates.sort((a, b) => cardStrength(a, ledSuit, trump) - cardStrength(b, ledSuit, trump))
     return candidates[0]
   }
@@ -146,13 +146,19 @@ function highestTrump(hand: Card[], trump: Trump): Card | null {
   return trumps[0]
 }
 
-/** Бросить две наименее ценные карты (сначала не-козыри, младшие). */
-function cardsToDiscard(hand: Card[], trump: Trump): Card[] {
+/**
+ * Бросить две наименее ценные карты (сначала не-козыри, младшие).
+ * cleanSuit — «чистая» масть мизера: если её можно не трогать, не трогаем.
+ */
+function cardsToDiscard(hand: Card[], trump: Trump, cleanSuit: Suit | null = null): Card[] {
+  const filtered = cleanSuit ? hand.filter((card) => suitOf(card) !== cleanSuit) : hand
+  const source = filtered.length >= 2 ? filtered : hand
+
   if (trump === "NT") {
-    const ordered = [...hand].sort((a, b) => cardStrength(a, "S", trump) - cardStrength(b, "S", trump))
+    const ordered = [...source].sort((a, b) => cardStrength(a, "S", trump) - cardStrength(b, "S", trump))
     return [ordered[0], ordered[1]]
   }
-  const ordered = [...hand].sort((a, b) => {
+  const ordered = [...source].sort((a, b) => {
     const aTrump = suitOf(a) === trump ? 1 : 0
     const bTrump = suitOf(b) === trump ? 1 : 0
     if (aTrump !== bTrump) return bTrump - aTrump // козыри в конец
@@ -243,7 +249,7 @@ function chooseBid(
     }
     return { type: "pass", seat }
   }
-  // Перебиваем, если рука Enough выше текущего заказа
+  // Перебиваем, если рука достаточно сильна для текущего заказа
   const { count: trumpCount } = trumpInfo(hand, highest.bid.trump)
   const needStrength = highest.bid.level * 2 + (trumpCount < 2 ? 3 : 0)
   if (strength >= needStrength && highest.bid.level < MAX_LEVEL) {
@@ -261,21 +267,23 @@ function chooseDeclare(
   hand: Card[],
   level: BotLevel,
 ): RoundAction {
-  // Снос: две наименее ценные карты
   const trump = round.highest?.bid.trump ?? "S"
-  const discard = cardsToDiscard(hand, trump)
+
+  // Мастер ищет «чистую» масть мизера и не сносит из неё.
+  const cleanSuit =
+    level === "MASTER"
+      ? ((["S", "H", "D", "C"] as Suit[]).find((s) => hasCleanSuit(hand, s)) ?? null)
+      : null
+  const discard = cardsToDiscard(hand, trump, cleanSuit)
 
   if (level === "NOVICE") {
     return { type: "declare", seat, contract: "game", discard }
   }
 
-  // Мастер и игрок: мизер только на чистой руке
-  if (level === "MASTER") {
-    const cleanSuit = (["S", "H", "D", "C"] as Suit[]).find((s) => hasCleanSuit(hand, s))
-    if (cleanSuit && handStrength(hand) >= 14) {
-      // Играем без козыря, мизер
-      return { type: "declare", seat, contract: "misere", discard }
-    }
+  // Мастер: мизер только на чистой руке и только с шестёрки — иначе движок не примет.
+  const misereAllowed = (round.highest?.bid.level ?? 0) === MIN_LEVEL
+  if (level === "MASTER" && misereAllowed && cleanSuit && handStrength(hand) >= 14) {
+    return { type: "declare", seat, contract: "misere", discard }
   }
 
   return { type: "declare", seat, contract: "game", discard }
@@ -323,11 +331,32 @@ function choosePlay(
 
   const led = round.trick[0]
   const trump = trumpOf(round)
+  const isMisere = round.contract?.kind === "misere"
 
   if (level === "NOVICE") {
-    // Случайная легальная карта (детерминированно: первая по сортировке руки)
+    // Простая игра: первая легальная карта по сортировке руки
     const legalSorted = [...legal].sort(compareHandCards)
     return { type: "play", seat, card: legalSorted[0] }
+  }
+
+  // Мизер, чужой ход: сбрасываем старшую из карт, которые точно не берут взятку —
+  // опасные карты должны уходить первыми, пока не заставили взять.
+  if (isMisere && led) {
+    const ledSuit = suitOf(led.card)
+    const bestSoFar = Math.max(
+      ...round.trick.map((item) => cardStrength(item.card, ledSuit, "NT")),
+    )
+    const safe = legal.filter((card) => cardStrength(card, ledSuit, "NT") < bestSoFar)
+    if (safe.length > 0) {
+      safe.sort((left, right) => rankStrength(right) - rankStrength(left))
+      return { type: "play", seat, card: safe[0] }
+    }
+  }
+
+  // Мизер, наш ход: младшая карта руки — высокие держим, чтобы сбросить на чужую взятку.
+  if (isMisere) {
+    const weakest = [...legal].sort((a, b) => rankStrength(a) - rankStrength(b))[0]
+    return { type: "play", seat, card: weakest }
   }
 
   if (led) {

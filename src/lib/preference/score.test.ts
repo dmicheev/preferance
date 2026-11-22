@@ -261,3 +261,17 @@ test("итог партии: места по «пуля − гора + вист�
     { seat: 0, place: 3, score: 18 },
   ])
 })
+
+test("ничья: выше место у игрока с меньшей горой", () => {
+  const table = createScoreTable(20)
+  table.entries[0] = { pool: 20, mountain: 4, whists: 2 }
+  table.entries[1] = { pool: 20, mountain: 2, whists: 0 }
+  table.entries[2] = { pool: 10, mountain: 0, whists: 0 }
+
+  // seat 0 и seat 1 по 18 очков; у seat 1 гора меньше — он выше.
+  assert.deepEqual(finalStandings(table), [
+    { seat: 1, place: 1, score: 18 },
+    { seat: 0, place: 2, score: 18 },
+    { seat: 2, place: 3, score: 10 },
+  ])
+})

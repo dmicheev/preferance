@@ -61,6 +61,8 @@ export type SessionState = {
   roundsPlayed: number
   /** Кто подтвердил готовность к следующей раздаче. */
   readyUserIds: string[]
+  /** Итог последней записанной раздачи — для тех, кто подключился во время паузы. */
+  lastResult: RoundResultView | null
 }
 
 /** Что игрок предлагает сделать: место сервер подставит сам, доверять клиенту нельзя. */
@@ -103,6 +105,7 @@ export function createSession(params: {
     round: null,
     roundsPlayed: 0,
     readyUserIds: [],
+    lastResult: null,
   }
 }
 
@@ -178,8 +181,8 @@ export function setReady(
     }
   }
 
-  const next: SessionState = { ...session, roundsPlayed: session.roundsPlayed }
-  return { ok: true, outcome: dealRound({ ...next, readyUserIds: ready }, seed) }
+  // dealRound сам сбрасывает готовность; готовность нужна была только для проверки.
+  return { ok: true, outcome: dealRound(session, seed) }
 }
 
 /** Снимок для конкретного зрителя: свои карты — картами, чужие — количеством. */
@@ -220,6 +223,7 @@ export function buildSnapshot(
     myHand,
     myLegalMoves,
     readyUserIds: [...session.readyUserIds],
+    lastRoundResult: session.lastResult,
     standings: session.status === "FINISHED" ? finalStandings(session.table) : null,
   }
 }
@@ -253,6 +257,7 @@ export function finishedSnapshot(params: {
     myHand: [],
     myLegalMoves: [],
     readyUserIds: [],
+    lastRoundResult: null,
     standings: params.standings,
   }
 }
@@ -260,7 +265,12 @@ export function finishedSnapshot(params: {
 function dealRound(session: SessionState, seed: number): SessionOutcome {
   const dealer = dealerFor(session.roundsPlayed)
   const round = createRound({ seed, dealer })
-  const next: SessionState = { ...session, round, readyUserIds: [] }
+  const next: SessionState = {
+    ...session,
+    round,
+    readyUserIds: [],
+    lastResult: null,
+  }
   return {
     session: next,
     actions: [{ type: "deal", roundNumber: session.roundsPlayed + 1, dealer }],
@@ -294,16 +304,19 @@ function absorb(
   }
   if (isPartyOver(next)) next.status = "FINISHED"
 
+  const result: RoundResultView = {
+    roundNumber: roundsPlayed,
+    outcome,
+    deltas: scored.deltas,
+    table: scored.table,
+    finished: next.status === "FINISHED",
+  }
+
   return {
-    session: next,
+    // Итог остаётся в сеансе: подключившийся в паузу готовности увидит его в снапшоте.
+    session: { ...next, lastResult: result },
     actions,
-    result: {
-      roundNumber: roundsPlayed,
-      outcome,
-      deltas: scored.deltas,
-      table: scored.table,
-      finished: next.status === "FINISHED",
-    },
+    result,
   }
 }
 

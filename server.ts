@@ -39,6 +39,15 @@ async function main() {
 
   process.on("SIGINT", () => void shutdown("SIGINT"))
   process.on("SIGTERM", () => void shutdown("SIGTERM"))
+
+  // Последняя линия обороны: ошибка одного хода не должна гасить все столы.
+  // Основные риски уже закрыты try/catch вокруг переходов и обработчиков сокетов.
+  process.on("unhandledRejection", (reason) => {
+    console.error("[server] необработанный reject:", reason)
+  })
+  process.on("uncaughtException", (error) => {
+    console.error("[server] непойманное исключение:", error)
+  })
 }
 
 main().catch((error) => {

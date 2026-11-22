@@ -2,7 +2,7 @@
 // и партия PLAYING — таймер на случайную паузу из BOT_DELAY, потом действие через applyUserProposal.
 // Один активный таймер на сеанс, снятие при финале партии.
 
-import { BOT_DELAY, chooseAction, type BotLevel } from "../lib/preference/bot"
+import { BOT_DELAY, chooseAction, normalizeBotLevel, type BotLevel } from "../lib/preference/bot"
 import { type UserProposal } from "./session-core"
 import { type SessionState } from "./session-core"
 import { getSession } from "./sessions"
@@ -115,9 +115,9 @@ async function executeBotTurn(
   const player = current.players.find((entry) => entry.userId === userId)
   if (!player || !player.isBot) return
 
-  const level: BotLevel = player.botLevel
-    ? (player.botLevel as BotLevel)
-    : "PLAYER"
+  // Уровень из БД может быть любым: неизвестное значение — обычный игрок,
+  // а не «случайно выпавший» мастер.
+  const level: BotLevel = normalizeBotLevel(player.botLevel)
   const action = chooseAction(round, seat, level)
 
   // RoundAction → UserProposal (место подставляет applyUserProposal)

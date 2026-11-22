@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react"
 
-import type { Contract } from "./preference/round"
+import type { Bid, Contract } from "./preference/round"
 import type { GameSettingsView } from "./protocol"
 
 const VARIANT_LABELS: Record<GameSettingsView["variant"], string> = {
@@ -69,4 +69,17 @@ const CONTRACT_SUITS: Record<string, string> = {
   H: "червях",
   D: "бубнах",
   C: "трефах",
+}
+
+const BID_GLYPHS: Record<string, string> = {
+  S: "♠",
+  C: "♣",
+  D: "♦",
+  H: "♥",
+  NT: "бк",
+}
+
+/** Компактный заказ для реплики над местом: «6♠», «9♦», «10бк». */
+export function bidText(bid: Bid): string {
+  return `${bid.level}${BID_GLYPHS[bid.trump] ?? ""}`
 }

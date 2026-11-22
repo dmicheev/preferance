@@ -1,8 +1,8 @@
-import type { Game } from "@/generated/prisma/client"
 import type { Prisma } from "@/generated/prisma/client"
 
 import { prisma } from "./db"
 import { generateGameKey } from "./game-key"
+import { normalizeBotLevel } from "./preference/bot"
 import {
   PLAYING_SEATS,
   type ChatMessageView,
@@ -43,6 +43,8 @@ export async function addBotPlayer(
   seat: number,
   level: string,
 ): Promise<{ userId: string; nickname: string }> {
+  // Уровень бота — только известные значения: в БД не должно попасть ничего странного.
+  const botLevel = normalizeBotLevel(level)
   // Подбираем свободный индекс для ника бота
   let index = 1
   let user = await createBotUser(index)
@@ -66,7 +68,7 @@ export async function addBotPlayer(
       seat,
       isHost: false,
       isBot: true,
-      botLevel: level,
+      botLevel,
     },
     include: { user: { select: { id: true, nickname: true } } },
   })
@@ -360,9 +362,12 @@ export async function findViewerContext(
   }
 }
 
-/** Статус стола в БД: лобби → идёт игра. */
+/** Статус стола в БД: лобби → идёт игра. Гвардия от затирания более нового статуса. */
 export async function markGamePlaying(key: string): Promise<void> {
-  await prisma.game.update({ where: { key }, data: { status: "PLAYING" } })
+  await prisma.game.updateMany({
+    where: { key, status: "LOBBY" },
+    data: { status: "PLAYING" },
+  })
 }
 
 /** Итоги партии в БД: места со счётом и закрытие стола. Повторный вызов не страшен. */
@@ -449,5 +454,3 @@ function isUniqueViolation(error: unknown): boolean {
     (error as { code?: unknown }).code === "P2002"
   )
 }
-
-export type GameRecord = Game

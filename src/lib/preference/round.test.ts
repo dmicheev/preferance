@@ -94,6 +94,33 @@ test("все спасовали — распасы без козыря", () => {
   assert.equal(state.declarer, null)
 })
 
+test("без козыря в торговле не заказывают", () => {
+  const state = createRound({ seed: 23, dealer: 0 })
+  assert.match(
+    fail(state, { type: "bid", seat: 1, level: 6, trump: "NT" }),
+    /Без козыря/,
+  )
+})
+
+test("мизер нельзя объявить поверх заказа выше шестёрки", () => {
+  let state = createRound({ seed: 24, dealer: 0 })
+  state = ok(state, { type: "bid", seat: 1, level: 7, trump: "H" })
+  state = ok(state, { type: "pass", seat: 2 })
+  state = ok(state, { type: "pass", seat: 0 })
+
+  assert.equal(state.phase, "declaring")
+  const hand = state.hands[1]
+  assert.match(
+    fail(state, {
+      type: "declare",
+      seat: 1,
+      contract: "misere",
+      discard: [hand[0], hand[1]],
+    }),
+    /только при заказе шестой/,
+  )
+})
+
 test("прикуп: снос двух карт, рука снова из десяти", () => {
   const state = afterBidding(15)
   const hand = state.hands[1]

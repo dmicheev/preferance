@@ -1,7 +1,7 @@
 // Подсчёт очков Ленинградки: пуля, гора, висты.
 // Сами цифры живут в Ruleset (rules.ts): пресет по умолчанию или выбор хозяина стола.
 
-import { PLAYER_COUNT } from "./constants"
+import { GAME_LEVELS, PLAYER_COUNT } from "./constants"
 import type { RoundOutcome, Seat } from "./round"
 import {
   DEFAULT_RULESET,
@@ -158,14 +158,20 @@ export type Standing = {
   score: number
 }
 
-/** Итог партии: места по «пуля − гора + висты», первый — с большим счётом. */
+/** Итог партии: места по «пуля − гора + висты». Ничья — меньше гора, затем место. */
 export function finalStandings(table: ScoreTable): Standing[] {
   const scored = table.entries
     .map((entry, seat) => ({
       seat: seat as Seat,
       score: entry.pool - entry.mountain + entry.whists,
+      mountain: entry.mountain,
     }))
-    .sort((left, right) => right.score - left.score)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.mountain - right.mountain ||
+        left.seat - right.seat,
+    )
 
   return scored.map((entry, index) => ({
     seat: entry.seat,
@@ -176,8 +182,6 @@ export function finalStandings(table: ScoreTable): Standing[] {
 
 /** Короткая строка правил для интерфейса: «2/4/6/8/10 · мизер 10 · висты 2/1». */
 export function rulesetSummary(rules: Ruleset): string {
-  const values = [6, 7, 8, 9, 10]
-    .map((level) => rules.gameValues[level] ?? "—")
-    .join("/")
+  const values = GAME_LEVELS.map((level) => rules.gameValues[level] ?? "—").join("/")
   return `игры ${values} · мизер ${rules.misereValue} · висты ${rules.whistRateSix}/${rules.whistRateHigh}`
 }

@@ -10,7 +10,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prefferance}
       POSTGRES_DB: ${POSTGRES_DB:-prefferance}
     ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+      # База слушает только localhost ноутбука: из интернета и даже
+      # из локальной сети до неё не достучаться, приложению хватает.
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

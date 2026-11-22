@@ -2,10 +2,21 @@ import { NextResponse } from "next/server"
 
 import { createGame, upsertUserByNickname } from "@/lib/game-service"
 import { normalizeRuleset } from "@/lib/preference/rules"
+import { clientRateKey, isRateLimited } from "@/lib/rate-limit"
 import { rememberSession } from "@/lib/session"
 import { createGameSchema } from "@/lib/validation"
 
+/** Открытый стол в интернет: не даём заспамить базу столами. */
+const CREATE_LIMIT = { requests: 10, windowMs: 60_000 }
+
 export async function POST(request: Request) {
+  if (isRateLimited(clientRateKey(request, "games-create"), CREATE_LIMIT.requests, CREATE_LIMIT.windowMs)) {
+    return NextResponse.json(
+      { error: "Слишком много запросов — подожди минуту" },
+      { status: 429 },
+    )
+  }
+
   let payload: unknown
   try {
     payload = await request.json()

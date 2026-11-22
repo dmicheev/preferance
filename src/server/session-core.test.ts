@@ -239,6 +239,24 @@ test("легальные ходы в снапшоте совпадают с дв
   assert.equal(bidding.round?.turn, 1)
 })
 
+test("итог последней раздачи доехал до снапшота — для подключившихся в паузу", () => {
+  const started = startGame(session(), 801)
+  if (!started.ok) throw new Error(started.error)
+
+  const fresh = buildSnapshot(started.outcome.session, null)
+  assert.equal(fresh.lastRoundResult, null, "до первой записи итогов нет")
+
+  const played = driveRound(started.outcome.session)
+  assert.ok(played.lastResult, "сеанс хранит итог записанной раздачи")
+
+  const spectator = buildSnapshot(played, null)
+  assert.equal(spectator.lastRoundResult?.roundNumber, 1)
+  assert.equal(
+    spectator.lastRoundResult && "hands" in spectator.lastRoundResult.outcome,
+    false,
+  )
+})
+
 test("человек стартовал — боты доиграли партию до записи мест", async () => {
   const { chooseAction } = await import("../lib/preference/bot")
 
