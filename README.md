@@ -1,36 +1,181 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Преферанс клуб
 
-## Getting Started
+Камерный преферанс для игры с друзьями по сети: свой сервер на домашней машине,
+Postgres в Docker и веб-стол со свечами, сукном и чатом.
 
-First, run the development server:
+**Текущий этап — визуальный прототип.** Лобби, посадка за стол по ссылке-ключу
+и текстовый чат уже работают. Движок правил Ленинградки (торговля, прикуп,
+взятки, пуля/гора/висты, распасы) написан и покрыт тестами, но к столу пока
+не подключён — карты в руке всё ещё декоративная раздача, об этом прямо
+написано под веером. Голос — следующий этап после подключения правил.
+Цифры очков (стоимость игр, мизер, висты, распасы) настраиваются в зале
+в диалоге «Правила и очки» и хранятся вместе с игрой.
+
+---
+
+## Что нужно
+
+| Зависимость | Версия | Зачем |
+| --- | --- | --- |
+| Node.js | **26.8.1** (см. `.nvmrc`) | Prisma 7 не поддерживает Node 23.x и ниже |
+| pnpm | 12.x | в `package.json` закреплён `packageManager` |
+| Docker | любой свежий | Postgres 17 в контейнере |
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+nvm use          # подхватит 26.8.1 из .nvmrc
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Без nvm: `export PATH="/Users/<you>/.nvm/versions/node/v26.8.1/bin:$PATH"`.
+Если Node ниже 26.8.1, `prisma generate`/`migrate` падают на неподдерживаемой версии.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Запуск
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cp .env.example .env      # один раз
+pnpm install              # postinstall сам сделает prisma generate
+pnpm db:up                # Postgres 17 на 127.0.0.1:5433
+pnpm db:migrate           # применить схему (или: pnpm exec prisma migrate deploy)
+pnpm dev                  # Next + Socket.IO на одном порту
+```
 
-## Learn More
+Открыть <http://localhost:3005>.
 
-To learn more about Next.js, take a look at the following resources:
+Порт **3005**, а не 3000: 3000 часто занят (например, Gotenberg в Docker).
+Postgres слушает **5433**, чтобы не конфликтовать с локальным Postgres на 5432.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Скрипты
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Команда | Что делает |
+| --- | --- |
+| `pnpm dev` | кастомный `server.ts` через `tsx watch` (Next dev + Socket.IO) |
+| `pnpm build` / `pnpm start` | production-сборка Next и запуск того же сервера |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm lint` | ESLint (включая `react-hooks`) |
+| `pnpm db:up` / `pnpm db:down` | контейнер Postgres (`docker-compose.yml`) |
+| `pnpm db:migrate` | `prisma migrate dev` |
+| `pnpm db:studio` | Prisma Studio |
 
-## Deploy on Vercel
+## Как играть с друзьями
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. На главной введите ник, выберите пулю и лимит раздач → **Создать стол**.
+2. Откроется стол с ключом из 6 символов; в панели стола есть готовая ссылка
+   вида `http://<host>:3005/g/G4NFDV`.
+3. Каждый друг открывает ссылку, вводит свой ник и садится. Три места за
+   столом (`PLAYING_SEATS`), четвёртый сдаёт по кругу.
+4. Паролей нет: ник — это личность (хранится в cookie `pf_player`), ключ стола —
+   это вход. Ник уникален без учёта регистра, по нему копится статистика.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Доступ из интернета
+
+Приложение слушает `0.0.0.0:3005`, поэтому достаточно пробросить порт на роутере.
+Пропишите публичный адрес в `.env`, иначе ссылка-приглашение покажет локальный:
+
+```env
+APP_URL="https://salon.example.com"
+```
+
+Важно для голоса: `getUserMedia` работает только в **secure context** — HTTPS
+либо `localhost`. По `http://192.168.x.x` микрофон браузер заблокирует. Варианты:
+
+- туннель с TLS (Cloudflare Tunnel, ngrok, tailscale funnel) → адрес в `APP_URL`;
+- reverse-proxy с сертификатом перед `3005`;
+- для быстрой проверки — `http://localhost:3005` на машине, где открыт браузер.
+
+## Устройство
+
+```
+server.ts                     Next + Socket.IO на одном порту (один адрес для проброса)
+src/server/socket.ts          комнаты, presence, чат, rate limit 6 сообщений / 6 с
+src/lib/protocol.ts           общие типы и события клиент↔сервер
+src/lib/game-service.ts       создание стола, посадка, вид стола, история чата
+src/lib/session.ts            cookie pf_player → пользователь
+src/lib/validation.ts         zod-схемы входящих данных
+src/lib/db.ts                 Prisma 7 + @prisma/adapter-pg
+src/app/api/games/            POST /api/games, POST /api/games/[key]/join
+src/app/g/[key]/page.tsx      RSC-загрузка стола + ссылка-приглашение
+src/components/hall/          главный зал: ник, настройки, вход по ключу
+src/components/table/         стол, места, чат, панель входа
+src/components/cards/         карты с настоящей раскладкой пипсов и веер руки
+src/app/globals.css           вся визуальная система: свечи, сукно, анимации
+src/lib/preference/           движок Ленинградки: карты, раздача, торговля, взятки, пуля
+prisma/schema.prisma          User / Game / GamePlayer / ChatMessage / GameResult
+```
+
+Стили — рукописный CSS (без Tailwind), шрифты через `next/font`
+(Cormorant Garamond + Inter). Клиент Prisma генерируется в `src/generated/prisma`
+и в git не попадает.
+
+### Натюрморт в углу
+
+`public/still/cognac-still.webp` — фотография (бутылка Hennessy X.O + два
+стакана), а не рисунок. Как она собрана: бутылка вырезана по белому фону
+(ключ по яркости), притушена под свет свечей; стаканы — CC0-кадр rawpixel
+(через Openverse), чёрный фон снят luminance-ключом; сверху тёплая лужица
+света и контактные тени, чтобы предметы не висели в воздухе. Размер на
+странице задаёт `.ambience__still` в `globals.css` (`clamp(140px, 10.5vw, 180px)`).
+
+### Проверка сокетов
+
+Смоук-тест поднимает двух клиентов, проверяет `room:state`, presence и доставку
+чата (нужны id двух игроков, сидящих за столом):
+
+```bash
+node scripts/socket-smoke.mjs G4NFDV <userIdA> <userIdB>
+```
+
+`userId` видно в Prisma Studio (`pnpm db:studio`) или в таблице `User`.
+
+## Правила и очки
+
+Движок в `src/lib/preference/` — чистая логика без БД и React:
+`cards.ts` (32 листа, старшинство мастей), `deal.ts` (раздача от зерна),
+`round.ts` (торговля → прикуп → висты → взятки), `rules.ts` (тип `Ruleset`
+и пресет), `score.ts` (пуля/гора/висты по цифрам из `Ruleset`).
+
+### Цифры настраиваются за столом
+
+В зале под именем есть строка **«Правила и очки»** — она открывает диалог, где
+любая цифра меняется под свою компанию:
+
+| Поле | Что задаёт |
+| --- | --- |
+| Игра в пулю (6–10) | стоимость игры в пулю |
+| Мизер в пулю | очки за выполненный мизер |
+| Недобор × стоимость | множитель штрафа за недобранные взятки |
+| Висты: на 6-й / на 7–10 / вистует один | висты за взятку |
+| Распасы: первый, за взятку / насколько дорожают | рост горы на распасах |
+
+Пресет по умолчанию — `DEFAULT_RULESET` в `src/lib/preference/rules.ts`:
+
+| Событие | Очки |
+| --- | --- |
+| Игра 6 / 7 / 8 / 9 / 10 | 2 / 4 / 6 / 8 / 10 в пулю |
+| Мизер выполнен | 10 в пулю |
+| Вист за взятку: на 6-й игре | 2 (один вистующий — 1) |
+| Вист за взятку: на 7–10 | 1 |
+| Недобор: за каждую недобранную взятку | 2 × стоимость игры в гору |
+| Мизер с взятками | 2 × 10 за каждую взятку в гору |
+| Распасы | 1, 2, 3… очко за взятку в гору (дорожают) |
+| Пуля | до `bullet` из настроек стола, перебор не пишется |
+
+Свои цифры уезжают в `Game.rules` (JSONB) при создании стола; `null` — игра на
+пресете. Проверить, что легло в базу:
+
+```bash
+docker exec prefferance-db psql -U prefferance -d prefferance \
+  -c 'select key, rules from "Game";'
+```
+
+Торговля: 6–10 взяток, внутри уровня масти от пик к без козыря
+(6♠ < 6♣ < 6♦ < 6♥ < 6БК < 7♠). Мизер объявляется после прикупа вместо игры;
+в мизере вистов нет. Прикуп — 2 карты, снос двух карт открыт.
+
+```bash
+pnpm test        # 36 тестов: колода, раздача, торговля, ходы, подсчёт
+```
+
+## Дальше по плану
+
+1. Подключить движок к столу: события сокетов, скрытие чужих рук, экраны торговли и хода.
+2. Голосовой чат WebRTC (mesh на 3–4 человека) вместо заглушки.
+3. Статистика игрока и история партий на основе `GameResult`.

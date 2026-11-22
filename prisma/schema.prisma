@@ -1,0 +1,112 @@
+// Схема БД преферанса: пользователи, столы, посадки, чат и результаты.
+// Документация: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum GameStatus {
+  LOBBY
+  PLAYING
+  FINISHED
+}
+
+enum GameVariant {
+  LENINGRADKA
+  SOCHINKA
+}
+
+model User {
+  id         String   @id @default(cuid())
+  nickname   String   @db.VarChar(24)
+  // Ник в нижнем регистре: уникальность без учёта регистра.
+  nicknameKey String  @unique @db.VarChar(24)
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  seats     GamePlayer[]
+  messages  ChatMessage[]
+  results   GameResult[]
+  hostedGames Game[]   @relation("GameHost")
+}
+
+model Game {
+  id              String      @id @default(cuid())
+  key             String      @unique @db.VarChar(8)
+  title           String?     @db.VarChar(48)
+  variant         GameVariant @default(LENINGRADKA)
+  bullet          Int         @default(20)
+  roundsLimit     Int?
+  maxPlayers      Int         @default(3)
+  allowSpectators Boolean     @default(false)
+  status          GameStatus  @default(LOBBY)
+  // Цифры пресета: игры 6–10, мизер, висты, недобор, распасы.
+  // Пустое значение = пресет по умолчанию (см. src/lib/preference/rules.ts).
+  rules           Json?
+
+  hostId String
+  host   User   @relation("GameHost", fields: [hostId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  finishedAt DateTime?
+
+  players  GamePlayer[]
+  messages ChatMessage[]
+  results  GameResult[]
+
+  @@index([status])
+}
+
+model GamePlayer {
+  id         String   @id @default(cuid())
+  gameId     String
+  userId     String
+  seat       Int
+  isHost     Boolean  @default(false)
+  isBot      Boolean  @default(false)
+  botLevel   String?  @db.VarChar(16)
+  joinedAt   DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@unique([gameId, seat])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  gameId    String
+  userId    String
+  // Ник зафиксирован на момент сообщения: чат не зависит от будущих смен ника.
+  nickname  String   @db.VarChar(24)
+  text      String   @db.VarChar(500)
+  createdAt DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([gameId, createdAt])
+}
+
+model GameResult {
+  id        String   @id @default(cuid())
+  gameId    String
+  userId    String
+  place     Int
+  score     Int
+  createdAt DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@index([userId])
+}
