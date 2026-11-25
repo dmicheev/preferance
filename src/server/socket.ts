@@ -584,6 +584,15 @@ export function attachSocketServer(httpServer: HttpServer) {
       )
     })
 
+    socket.on("game:misere", () => {
+      void runTransition(
+        socket.data.key,
+        (session) =>
+          applyUserProposal(session, socket.data.userId, { type: "misere" }),
+        reportGameError,
+      )
+    })
+
     socket.on("game:pass", () => {
       void runTransition(
         socket.data.key,
@@ -601,7 +610,27 @@ export function attachSocketServer(httpServer: HttpServer) {
             type: "declare",
             contract: payload?.contract,
             discard: payload?.discard,
+            level: payload?.level,
+            trump: payload?.trump,
           }),
+        reportGameError,
+      )
+    })
+
+    socket.on("game:prikup-ack", () => {
+      void runTransition(
+        socket.data.key,
+        (session) =>
+          applyUserProposal(session, socket.data.userId, { type: "prikup-ack" }),
+        reportGameError,
+      )
+    })
+
+    socket.on("game:trick-ack", () => {
+      void runTransition(
+        socket.data.key,
+        (session) =>
+          applyUserProposal(session, socket.data.userId, { type: "trick-ack" }),
         reportGameError,
       )
     })

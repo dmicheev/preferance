@@ -13,7 +13,10 @@ import {
   applyAction,
   createRound,
   legalMoves,
+  otherSeats,
   roundOutcome,
+  soloWhistController,
+  soloWhistPartner,
   type RoundAction,
   type RoundState,
   type Seat,
@@ -68,8 +71,18 @@ export type SessionState = {
 /** Что игрок предлагает сделать: место сервер подставит сам, доверять клиенту нельзя. */
 export type UserProposal =
   | { type: "bid"; level: number; trump: Trump }
+  | { type: "misere" }
   | { type: "pass" }
-  | { type: "declare"; contract: "game" | "misere"; discard: Card[] }
+  | { type: "prikup-ack" }
+  | { type: "trick-ack" }
+  | {
+      type: "declare"
+      contract: "game" | "misere"
+      discard: Card[]
+      /** Подъём после прикуса — приходит от клиента, проверяем отдельно. */
+      level?: unknown
+      trump?: unknown
+    }
   | { type: "whist"; whist: boolean }
   | { type: "play"; card: Card }
 
@@ -200,6 +213,25 @@ export function buildSnapshot(
     mine && round ? [...round.hands[mine.seat]].sort(compareHandCards) : []
   const myLegalMoves = mine && round ? legalMoves(round, mine.seat) : []
 
+  // Одиночный вист: вистующий играет в открытую и ходит за себя и за пасующего.
+  // Карты пасующего видит только вистующий; сам пасующий свою руку уже не видит.
+  const controller = round ? soloWhistController(round) : null
+  const iAmController =
+    mine !== undefined && controller !== null && controller === mine.seat
+  const iAmPasser =
+    mine !== undefined &&
+    controller !== null &&
+    round !== null &&
+    round.declarer !== mine.seat &&
+    mine.seat !== controller
+  const partnerSeat = iAmController && round ? soloWhistPartner(round, controller) : null
+  const partnerHand =
+    partnerSeat !== null && round
+      ? [...round.hands[partnerSeat]].sort(compareHandCards)
+      : []
+  const partnerLegalMoves =
+    partnerSeat !== null && round ? legalMoves(round, partnerSeat) : []
+
   const players: GamePlayerView[] = session.players.map((entry) => ({
     seat: entry.seat,
     userId: entry.userId,
@@ -220,8 +252,12 @@ export function buildSnapshot(
     table: session.table,
     round: round ? roundView(round) : null,
     mySeat,
-    myHand,
-    myLegalMoves,
+    // Пасующий при одиночном висте не играет: свою руку он больше не видит.
+    myHand: iAmPasser ? [] : myHand,
+    myLegalMoves: iAmPasser ? [] : myLegalMoves,
+    partnerSeat,
+    partnerHand,
+    partnerLegalMoves,
     readyUserIds: [...session.readyUserIds],
     lastRoundResult: session.lastResult,
     standings: session.status === "FINISHED" ? finalStandings(session.table) : null,
@@ -256,6 +292,9 @@ export function finishedSnapshot(params: {
     mySeat: params.mySeat,
     myHand: [],
     myLegalMoves: [],
+    partnerSeat: null,
+    partnerHand: [],
+    partnerLegalMoves: [],
     readyUserIds: [],
     lastRoundResult: null,
     standings: params.standings,
@@ -322,7 +361,18 @@ function absorb(
 
 /** События хода: сама карта и, если взятка сошлась, её победитель. */
 function playActions(action: RoundAction, round: RoundState): GameActionView[] {
-  if (action.type !== "play") return [actionView(action)]
+  if (action.type !== "play") {
+    const events: GameActionView[] = [actionView(action)]
+    // Ставка или пас закрыли торговлю — стол услышал, что прикуп открыт.
+    if (
+      (action.type === "bid" || action.type === "pass") &&
+      round.phase === "declaring" &&
+      round.declarer !== null
+    ) {
+      events.push({ type: "prikup", seat: round.declarer })
+    }
+    return events
+  }
   const events: GameActionView[] = [{ type: "card", seat: action.seat, card: action.card }]
   const last = round.history.at(-1)
   if (last && round.trick.length === 0) {
@@ -335,10 +385,22 @@ function actionView(action: RoundAction): GameActionView {
   switch (action.type) {
     case "bid":
       return { type: "bid", seat: action.seat, bid: { level: action.level, trump: action.trump } }
+    case "misere":
+      return { type: "misere", seat: action.seat }
     case "pass":
       return { type: "pass", seat: action.seat }
+    case "prikup-ack":
+      return { type: "prikup-ack", seat: action.seat }
+    case "trick-ack":
+      return { type: "trick-ack", seat: action.seat }
     case "declare":
-      return { type: "declare", seat: action.seat, contract: action.contract }
+      return {
+        type: "declare",
+        seat: action.seat,
+        contract: action.contract,
+        level: action.level,
+        trump: action.trump,
+      }
     case "whist":
       return { type: "whist", seat: action.seat, whist: action.whist }
     case "play":
@@ -371,8 +433,14 @@ function toRoundAction(
         action: { type: "bid", seat, level: proposal.level, trump: proposal.trump },
       }
     }
+    case "misere":
+      return { ok: true, action: { type: "misere", seat } }
     case "pass":
       return { ok: true, action: { type: "pass", seat } }
+    case "prikup-ack":
+      return { ok: true, action: { type: "prikup-ack", seat } }
+    case "trick-ack":
+      return { ok: true, action: { type: "trick-ack", seat } }
     case "declare": {
       if (proposal.contract !== "game" && proposal.contract !== "misere") {
         return fail("Неизвестный тип контракта")
@@ -385,6 +453,22 @@ function toRoundAction(
       ) {
         return fail("Снос — две настоящие карты")
       }
+      // Подъём после прикупа: оба поля опциональны, но каждое проверяем.
+      let level: number | undefined
+      if (proposal.level !== undefined && proposal.level !== null) {
+        if (typeof proposal.level !== "number" || !Number.isInteger(proposal.level)) {
+          return fail("Уровень заказа — число")
+        }
+        if (proposal.level < MIN_LEVEL || proposal.level > MAX_LEVEL) {
+          return fail(`Заказ — от ${MIN_LEVEL} до ${MAX_LEVEL} взяток`)
+        }
+        level = proposal.level
+      }
+      let trump: Trump | undefined
+      if (proposal.trump !== undefined && proposal.trump !== null) {
+        if (!isTrump(proposal.trump)) return fail("Неизвестная масть заказа")
+        trump = proposal.trump
+      }
       return {
         ok: true,
         action: {
@@ -392,6 +476,8 @@ function toRoundAction(
           seat,
           contract: proposal.contract,
           discard: [discard[0], discard[1]],
+          level,
+          trump,
         },
       }
     }
@@ -404,9 +490,24 @@ function toRoundAction(
   }
 }
 
-/** Публичная часть раздачи: без рук, прикупа и сноса. */
+/** Публичная часть раздачи: без рук, сноса и закрытого прикупа. */
 function roundView(round: RoundState): RoundView {
   const lastTrick = round.history.at(-1) ?? null
+  // Открытые руки:
+  // — мизер: оба защитника играют в открытую, рука играющего закрыта;
+  // — одиночный вист: вистующий играет в открытую, ходя за себя и за пасующего.
+  const endplay = round.phase === "play" || round.phase === "scored"
+  const misereOpen = round.contract?.kind === "misere" && endplay
+  const solo = soloWhistController(round)
+  const openSeats = misereOpen
+    ? otherSeats(round.declarer)
+    : solo !== null
+      ? [solo]
+      : []
+  const openHands = openSeats.map((seat) => ({
+    seat,
+    cards: [...round.hands[seat]].sort(compareHandCards),
+  }))
   return {
     phase: round.phase,
     dealer: round.dealer,
@@ -418,11 +519,16 @@ function roundView(round: RoundState): RoundView {
     declarer: round.declarer,
     contract: round.contract ? { ...round.contract } : null,
     discardCount: round.discard.length,
+    // Прикуп открыт всем на время «все жмут Ок»; до и после — скрыт.
+    prikupOpen: round.phase === "declaring" ? [...round.prikup] : null,
+    prikupAck: [...round.prikupAck],
+    trickAck: [...round.trickAck],
     whist: [...round.whist],
     trick: [...round.trick],
     lastTrick,
     tricks: [...round.tricks],
     handSizes: round.hands.map((hand) => hand.length),
+    openHands,
   }
 }
 

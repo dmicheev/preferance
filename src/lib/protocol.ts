@@ -100,11 +100,22 @@ export type RoundView = {
   contract: Contract | null
   /** Сколько карт снесено: 0 до сноса, 2 после. */
   discardCount: number
+  /** Открытый прикуп: две карты лежат в открытую, пока все не нажмут Ок. */
+  prikupOpen: Card[] | null
+  /** Кто уже подтвердил, что посмотрел прикуп. */
+  prikupAck: Seat[]
+  /** Кто уже посмотрел собранную взятку: карты на сукне до Ок от всех. */
+  trickAck: Seat[]
   whist: (boolean | null)[]
   trick: TrickCard[]
   lastTrick: CompletedTrick | null
   tricks: number[]
   handSizes: number[]
+  /**
+   * Открытые руки при мизере: двое играют в открытую, их карты видны всем.
+   * Рука играющего остаётся закрытой — сюда она не попадает никогда.
+   */
+  openHands: { seat: Seat; cards: Card[] }[]
 }
 
 /**
@@ -127,6 +138,15 @@ export type GameSnapshot = {
   myHand: Card[]
   /** Какие свои карты можно сыграть сейчас (пусто — не ход игрока). */
   myLegalMoves: Card[]
+  /**
+   * Одиночный вист: место пасующего, за которое я тоже хожу.
+   * Заполнено только у вистующего, играющего за двоих; у остальных null.
+   */
+  partnerSeat: Seat | null
+  /** Карты пасующего: видит только вистующий, играющий за двоих. */
+  partnerHand: Card[]
+  /** Легальные карты чужой руки — когда ход за пасующим. */
+  partnerLegalMoves: Card[]
   /** Кто подтвердил готовность к следующей раздаче. */
   readyUserIds: string[]
   /** Итог последней записанной раздачи: чтобы опоздавшие увидели паузу с итогами. */
@@ -138,8 +158,12 @@ export type GameSnapshot = {
 export type GameActionView =
   | { type: "deal"; roundNumber: number; dealer: Seat }
   | { type: "bid"; seat: Seat; bid: Bid }
+  | { type: "misere"; seat: Seat }
   | { type: "pass"; seat: Seat }
-  | { type: "declare"; seat: Seat; contract: "game" | "misere" }
+  | { type: "prikup"; seat: Seat }
+  | { type: "prikup-ack"; seat: Seat }
+  | { type: "trick-ack"; seat: Seat }
+  | { type: "declare"; seat: Seat; contract: "game" | "misere"; level?: number; trump?: Trump }
   | { type: "whist"; seat: Seat; whist: boolean }
   | { type: "card"; seat: Seat; card: Card }
   | { type: "trick"; winner: Seat }
@@ -160,8 +184,17 @@ export type RoundResultView = {
 
 export type GameStartPayload = Record<string, never>
 export type GameBidPayload = { level: number; trump: Trump }
-export type GameDeclarePayload = { contract: "game" | "misere"; discard: Card[] }
+export type GameMiserePayload = Record<string, never>
+export type GameDeclarePayload = {
+  contract: "game" | "misere"
+  discard: Card[]
+  /** Подъём после прикупа: играют не ниже заказанного, поэтому только вверх. */
+  level?: number
+  trump?: Trump
+}
 export type GameWhistPayload = { whist: boolean }
+export type GamePrikupAckPayload = Record<string, never>
+export type GameTrickAckPayload = Record<string, never>
 export type GameCardPayload = { card: Card }
 export type GameReadyPayload = Record<string, never>
 export type GamePassPayload = Record<string, never>
@@ -174,8 +207,11 @@ export type ClientToServerEvents = {
   "chat:send": (payload: SendChatPayload) => void
   "game:start": (payload: GameStartPayload) => void
   "game:bid": (payload: GameBidPayload) => void
+  "game:misere": (payload: GameMiserePayload) => void
   "game:pass": (payload: GamePassPayload) => void
   "game:declare": (payload: GameDeclarePayload) => void
+  "game:prikup-ack": (payload: GamePrikupAckPayload) => void
+  "game:trick-ack": (payload: GameTrickAckPayload) => void
   "game:whist": (payload: GameWhistPayload) => void
   "game:card": (payload: GameCardPayload) => void
   "game:ready": (payload: GameReadyPayload) => void
