@@ -89,7 +89,7 @@ test("одиночный вист: вистующий пишет висты за
   assert.equal(result.table.entries[2].whists, 7)
 })
 
-test("недобор на висте: шестерная — 4 на двоих, недобор каждому", () => {
+test("недобор на висте: шестерная — 4 на двоих, пишет слабейший", () => {
   const result = applyRoundScore(
     createScoreTable(20),
     outcome({
@@ -99,9 +99,9 @@ test("недобор на висте: шестерная — 4 на двоих, 
       whisters: [0, 2],
     }),
   )
-  // Норма пары — 4 на двоих: вместе 3, недобор 1 пишут оба по цене игры.
+  // Норма пары — 4 на двоих: вместе 3, недобор 1 пишет слабейший (взял 1).
   assert.equal(result.table.entries[0].mountain, 2)
-  assert.equal(result.table.entries[2].mountain, 2, "норму не закрыли вместе — недобору каждый")
+  assert.equal(result.table.entries[2].mountain, 0, "партнёр свою часть нормы взял — не пишет")
   // Висты считаются как раньше: 1 × 2 и 2 × 2.
   assert.deepEqual(
     result.table.entries.map((entry) => entry.whists),
@@ -142,7 +142,7 @@ test("недобор на висте: одиночка на шестерной �
   assert.equal(result.table.entries[2].mountain, 2)
 })
 
-test("недобор на висте: 7 и 8 — строго 2 на двоих, недобор каждому", () => {
+test("недобор на висте: 7 и 8 — строго 2 на двоих, пишет слабейший", () => {
   const made = applyRoundScore(
     createScoreTable(20),
     outcome({
@@ -165,8 +165,8 @@ test("недобор на висте: 7 и 8 — строго 2 на двоих,
       whisters: [1, 2],
     }),
   )
-  // Вместе 1 из 2: каждая недобранная — каждому по полной цене семёрной.
-  assert.equal(short.table.entries[1].mountain, 4)
+  // Вместе 1 из 2: недобор 1 пишет слабейший (взял 0) по полной цене семёрной.
+  assert.equal(short.table.entries[1].mountain, 0)
   assert.equal(short.table.entries[2].mountain, 4)
 })
 
@@ -193,7 +193,7 @@ test("недобор на висте: девятная — 1 на двоих, д
       whisters: [1, 2],
     }),
   )
-  // Ни одной на двоих: каждому по полной цене девятной.
+  // Ни одной на двоих: взяли поровну — недобор пишут оба, цена девятной.
   assert.equal(empty.table.entries[1].mountain, 8)
   assert.equal(empty.table.entries[2].mountain, 8)
 
@@ -220,8 +220,8 @@ test("недобор на бескозырке: норма по порядку �
       whisters: [0, 2],
     }),
   )
-  // Норма как на шестёрной — 4 на двоих (вместе 2, недобор 2 каждому);
-  // цена недобора — как семёрной (4): 2 × 4 = 8.
+  // Норма как на шестёрной — 4 на двоих (вместе 2, недобор 2);
+  // взяли поровну — пишут оба, цена недобора — как семёрной (4): 2 × 4 = 8.
   assert.equal(result.table.entries[0].mountain, 8)
   assert.equal(result.table.entries[2].mountain, 8)
 })
@@ -230,10 +230,11 @@ test("нормы виста: таблица недобора", () => {
   assert.deepEqual(whistShortfall(6, [2, 2]), [0, 0], "норма пары: 4 на двоих")
   assert.deepEqual(whistShortfall(6, [1, 3]), [0, 0], "вместе 4 — никто не пишет, даже при 1 взятке")
   assert.deepEqual(whistShortfall(6, [0, 4]), [0, 0], "норму закрыл партнёр")
-  assert.deepEqual(whistShortfall(6, [1, 2]), [1, 1], "вместе 3 — недобору каждый")
+  assert.deepEqual(whistShortfall(6, [1, 2]), [1, 0], "вместе 3 — пишет слабейший")
+  assert.deepEqual(whistShortfall(6, [1, 1]), [2, 2], "взяли поровну — недобору каждый")
   assert.deepEqual(whistShortfall(6, [3]), [1])
   assert.deepEqual(whistShortfall(7, [2, 0]), [0, 0], "на двоих достаточно")
-  assert.deepEqual(whistShortfall(8, [1, 0]), [1, 1], "недобор пишется каждому")
+  assert.deepEqual(whistShortfall(8, [1, 0]), [0, 1], "недобор пишет слабейший")
   assert.deepEqual(whistShortfall(8, [2]), [0])
   assert.deepEqual(whistShortfall(9, [1, 0]), [0, 0])
   assert.deepEqual(whistShortfall(9, [0]), [1])
