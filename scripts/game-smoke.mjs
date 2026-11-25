@@ -77,10 +77,11 @@ function waitFor(condition, label, timeout = 8000) {
   })
 }
 
-/** Карта в снапшоте легальна, только если это своя рука или карты на столе. */
+/** Карта в снапшоте легальна, только если это своя рука, прикуп или карты на столе. */
 function assertNoLeak(snapshot, label) {
   const allowed = new Set([
     ...snapshot.myHand,
+    ...(snapshot.round?.prikupOpen ?? []),
     ...(snapshot.round?.trick ?? []).map((item) => item.card),
     ...(snapshot.round?.lastTrick?.cards ?? []).map((item) => item.card),
   ])
@@ -177,7 +178,7 @@ const driver = setInterval(() => {
     const signature =
       round.phase === "scored"
         ? `scored:${snapshot.readyUserIds.length}`
-        : `${round.phase}:${round.turn}:${round.discardCount}:${round.trick.length}:${round.bids.map((bid) => (bid === null ? "-" : bid === "pass" ? "p" : "b")).join("")}`
+        : `${round.phase}:${round.turn ?? "wait"}:${round.discardCount}:${round.prikupAck.length}:${round.trickAck.length}:${round.trick.length}:${round.bids.map((bid) => (bid === null ? "-" : bid === "pass" ? "p" : "b")).join("")}`
 
     if (player.lastSignature === signature) continue
     player.lastSignature = signature
@@ -188,6 +189,11 @@ const driver = setInterval(() => {
       } else {
         player.socket.emit("game:pass", {})
       }
+    } else if (round.phase === "declaring" && round.prikupAck.length < 3) {
+      // Прикуп открыт: каждый жмёт Ок, снос после последнего.
+      if (!round.prikupAck.includes(snapshot.mySeat)) {
+        player.socket.emit("game:prikup-ack", {})
+      }
     } else if (
       round.phase === "declaring" &&
       round.declarer === snapshot.mySeat &&
@@ -195,10 +201,18 @@ const driver = setInterval(() => {
     ) {
       player.socket.emit("game:declare", {
         contract: "game",
+        // Правило после прикупа: заказ можно поднять — смок поднимает 6♠ до 7♠.
         discard: snapshot.myHand.slice(0, 2),
+        level: 7,
+        trump: "S",
       })
     } else if (round.phase === "whist" && round.turn === snapshot.mySeat) {
       player.socket.emit("game:whist", { whist: false })
+    } else if (round.phase === "play" && round.turn === null) {
+      // Взятка сошлась: каждый жмёт Ок, потом победитель ходит.
+      if (!round.trickAck.includes(snapshot.mySeat)) {
+        player.socket.emit("game:trick-ack", {})
+      }
     } else if (round.phase === "play" && round.turn === snapshot.mySeat) {
       const card = snapshot.myLegalMoves[0]
       if (card) player.socket.emit("game:card", { card })
@@ -216,6 +230,13 @@ const driver = setInterval(() => {
 // Ждём итог раздачи
 const result = await roundResult(60000)
 console.log("раздача сыграна   ", `контракт=${JSON.stringify(result.outcome.contract)}`)
+if (
+  result.outcome.contract.kind !== "game" ||
+  result.outcome.contract.level !== 7 ||
+  result.outcome.contract.trump !== "S"
+) {
+  throw new Error(`подъём заказа не доехал: ${JSON.stringify(result.outcome.contract)}`)
+}
 console.log(
   "таблица после     ",
   result.table.entries
@@ -281,9 +302,9 @@ console.log(
   `место=${snapshot.mySeat}, фаза=${snapshot.round.phase}, карт=${snapshot.myHand.length}`,
 )
 
-// Зрители за этим столом не разрешены
+// Зрители за этим столом не разрешены: подделка cookie отсекается на рукопожатии
 const stranger = connect("pf_player=stranger-user-id")
-const strangerError = queue(stranger, "room:error")
+const strangerError = queue(stranger, "connect_error")
 stranger.emit("room:join", { key: table.key })
 const error = await strangerError()
 console.log("зритель отсажен   ", JSON.stringify(error.message))

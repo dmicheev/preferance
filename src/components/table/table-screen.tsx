@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Candle } from "@/components/candle"
 import { HandFan } from "@/components/cards/hand-fan"
 import { bidText, settingsSummary, statusLabel } from "@/lib/format"
+import { PLAYER_COUNT } from "@/lib/preference/constants"
+import { soloWhistController } from "@/lib/preference/round"
 import type { Card, Trump } from "@/lib/preference/cards"
 import type { Seat } from "@/lib/preference/round"
 import { rulesetSummary } from "@/lib/preference/score"
@@ -168,17 +170,40 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
       emitGame((socket) => socket.emit("game:bid", { level, trump })),
     [emitGame],
   )
+  const sendMisere = useCallback(
+    () => emitGame((socket) => socket.emit("game:misere", {})),
+    [emitGame],
+  )
   const sendPass = useCallback(
     () => emitGame((socket) => socket.emit("game:pass", {})),
     [emitGame],
   )
   const sendDeclare = useCallback(
-    (contract: "game" | "misere", discard: string[]) =>
-      emitGame((socket) => socket.emit("game:declare", { contract, discard: discard as Card[] })),
+    (
+      contract: "game" | "misere",
+      discard: string[],
+      raise?: { level: number; trump: Trump },
+    ) =>
+      emitGame((socket) =>
+        socket.emit("game:declare", {
+          contract,
+          discard: discard as Card[],
+          level: raise?.level,
+          trump: raise?.trump,
+        }),
+      ),
     [emitGame],
   )
   const sendWhist = useCallback(
     (whist: boolean) => emitGame((socket) => socket.emit("game:whist", { whist })),
+    [emitGame],
+  )
+  const sendPrikupAck = useCallback(
+    () => emitGame((socket) => socket.emit("game:prikup-ack", {})),
+    [emitGame],
+  )
+  const sendTrickAck = useCallback(
+    () => emitGame((socket) => socket.emit("game:trick-ack", {})),
     [emitGame],
   )
   const sendCard = useCallback(
@@ -216,19 +241,43 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
   const handleCardClick = useCallback(
     (card: Card) => {
       const round = game?.round
-      if (!game?.mySeat || !round) return
+      // Место игрока бывает нулевым (хозяин стола): сравниваем с null, а не с falsy.
+      if (game?.mySeat === null || game?.mySeat === undefined || !round) return
 
       if (round.phase === "play" && round.turn === game.mySeat) {
-        if (game.myLegalMoves.includes(card)) sendCard(card)
+        if (game.myLegalMoves.includes(card)) {
+          sendCard(card)
+        } else {
+          // Молчаливый игнор выглядит как «сломанные клики»: объясняем, почему нельзя.
+          setGameError("Эту карту сейчас не сыграть — ходи в масть или козыря")
+        }
         return
       }
-      if (round.phase === "declaring" && round.declarer === game.mySeat) {
+      if (round.phase === "declaring") {
+        // Снос открывается только после того, как все посмотрели прикуп.
+        if (round.declarer !== game.mySeat) {
+          setGameError("прикуп разбирает другой игрок")
+          return
+        }
+        if (round.prikupAck.length < PLAYER_COUNT) {
+          setGameError("сначала все нажимают «Ок» на открытый прикуп")
+          return
+        }
         setDiscardPick((previous) =>
           previous.includes(card)
             ? previous.filter((entry) => entry !== card)
             : previous.length >= 2
               ? previous
               : [...previous, card],
+        )
+        return
+      }
+      // Клик вне своей очереди: подсказываем, что происходит, вместо тишины.
+      if (round.phase === "play") {
+        setGameError(
+          round.turn === null && round.trickAck.length < PLAYER_COUNT
+            ? "сначала все смотрят собранную взятку"
+            : "сейчас не твой ход",
         )
       }
     },
@@ -282,7 +331,8 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
   )
 
   const playableSet = useMemo(() => {
-    if (!game?.mySeat || !round) return null
+    // Место бывает нулевым (хозяин стола): сравниваем с null, иначе его рука не подсвечивается.
+    if (game?.mySeat === null || game?.mySeat === undefined || !round) return null
     if (round.phase === "play" && round.turn === game.mySeat) {
       return new Set<Card>(game.myLegalMoves)
     }
@@ -335,24 +385,110 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
     return result
   }, [game, round, layout])
 
+  // Пасующий при одиночном висте выбыл: его рукой ходит вистующий.
+  const whistController = round ? soloWhistController(round) : null
+  const iAmPasser =
+    game?.mySeat !== null &&
+    game?.mySeat !== undefined &&
+    whistController !== null &&
+    round !== null &&
+    round.declarer !== game.mySeat &&
+    whistController !== game.mySeat
+
   const handNote = !game
     ? null
     : game.status === "LOBBY"
       ? "ждём сдачу — партию начнёт хозяин стола"
-      : game.mySeat === null
-        ? "ты зритель — чужие карты не показываем"
-        : null
+      : iAmPasser
+        ? `ходами за тебя ведёт ${game.players.find((player) => player.seat === whistController)?.nickname ?? "вистующий"} — твоя рука закрыта`
+        : game.mySeat === null
+          ? "ты зритель — чужие карты не показываем"
+          : null
 
-  const seatRole = (seat: number, isHost: boolean): string => {
-    if (!round) return isHost ? "хозяин стола" : "игрок"
-    if (round.declarer === seat) return "играющий"
-    if (round.whist[seat] === true) return "вистующий"
-    return isHost ? "хозяин стола" : "игрок"
+  const seatRole = (isHost: boolean): string => (isHost ? "хозяин стола" : "игрок")
+
+  /**
+   * Статус места в раздаче: заказал игру, вистует или спасовал.
+   * Держится от торговли до записи раздачи — решение на вист не теряется.
+   */
+  const playStateFor = (
+    seat: number | null | undefined,
+  ): { text: string; tone: "game" | "whist" | "pass" } | null => {
+    if (!round || seat === null || seat === undefined) return null
+    if (round.phase === "bidding") {
+      const bid = round.bids[seat as Seat]
+      if (bid === "pass") return { text: "пас", tone: "pass" }
+      if (bid) return { text: "игра", tone: "game" }
+      return null
+    }
+    if (round.declarer === seat) {
+      return {
+        text: round.contract?.kind === "misere" ? "мизер" : "игра",
+        tone: "game",
+      }
+    }
+    // В фазе виста чужой пас из торговли не показываем: место ещё не отвечало
+    // на вопрос «вистовать?» — бейдж появится с решением.
+    if (round.phase === "whist") {
+      if (round.whist[seat as Seat] === true) return { text: "вист", tone: "whist" }
+      if (round.whist[seat as Seat] === false) return { text: "пас", tone: "pass" }
+      return null
+    }
+    if (round.whist[seat as Seat] === true) return { text: "вист", tone: "whist" }
+    if (round.whist[seat as Seat] === false || round.bids[seat as Seat] === "pass") {
+      return { text: "пас", tone: "pass" }
+    }
+    return null
   }
+
+  // Взятки на руках показываем с начала розыгрыша и до записи раздачи.
+  const showTricks =
+    round !== null && (round.phase === "play" || round.phase === "scored")
+  const tricksFor = (seat: number): number | undefined =>
+    showTricks ? (round?.tricks[seat] ?? 0) : undefined
 
   const backsFor = (seat: number, seated: boolean): number => {
     if (!round) return seated ? 4 : 0
     return round.handSizes[seat] ?? 0
+  }
+
+  // Мизер играется в открытую: руки защитников видны всем, рука играющего закрыта.
+  // Одиночный вист: рука вистующего открыта всем, а карты пасующего видит
+  // только сам вистующий — он ходит за двоих.
+  // Свои карты не дублируем — они и так лежат в веере внизу.
+  const openCardsFor = (seat: number | null | undefined): Card[] | null => {
+    if (!round || seat === null || seat === undefined) return null
+    if (seat === game?.mySeat) return null
+    const entry = round.openHands.find((item) => item.seat === seat)
+    if (entry) return entry.cards
+    if (game?.partnerSeat === seat && game.partnerHand.length > 0) {
+      return game.partnerHand
+    }
+    return null
+  }
+
+  // Ход картой пасующего: клики по открытым картам на его месте.
+  const handlePartnerCard = useCallback(
+    (card: Card) => {
+      if (!game || !round) return
+      if (round.phase === "play" && round.turn === game.partnerSeat) {
+        if (game.partnerLegalMoves.includes(card)) {
+          sendCard(card)
+        } else {
+          setGameError("Эту карту за пасующего не сыграть — ходи в масть")
+        }
+        return
+      }
+      setGameError("Сейчас ход не за пасующего")
+    },
+    [game, round, sendCard],
+  )
+
+  const partnerClickFor = (seat: number | null | undefined):
+    | ((card: Card) => void)
+    | undefined => {
+    if (game?.partnerSeat === null || game?.partnerSeat === undefined) return undefined
+    return seat === game.partnerSeat ? handlePartnerCard : undefined
   }
 
   const onlineCount = room?.onlineCount ?? 0
@@ -460,11 +596,7 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
           <SeatPlate
             position="left"
             nickname={layout.left?.nickname ?? null}
-            role={
-              layout.left
-                ? seatRole(layout.left.seat, layout.left.isHost)
-                : "пустует"
-            }
+            role={layout.left ? seatRole(layout.left.isHost) : "пустует"}
             online={layout.left?.online ?? null}
             isBot={layout.left?.isBot ?? false}
             botLevel={layout.left?.botLevel ?? null}
@@ -474,17 +606,17 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
             onBotSeat={sendBotSeat}
             onBotRemove={sendBotRemove}
             backs={backsFor(layout.left?.seat ?? -1, layout.left !== null)}
+            openCards={openCardsFor(layout.left?.seat)}
+            onOpenCardClick={partnerClickFor(layout.left?.seat)}
+            tricks={tricksFor(layout.left?.seat ?? -1)}
             balloon={balloons.left ?? null}
+            playState={playStateFor(layout.left?.seat)}
           />
 
           <SeatPlate
             position="right"
             nickname={layout.right?.nickname ?? null}
-            role={
-              layout.right
-                ? seatRole(layout.right.seat, layout.right.isHost)
-                : "пустует"
-            }
+            role={layout.right ? seatRole(layout.right.isHost) : "пустует"}
             online={layout.right?.online ?? null}
             isBot={layout.right?.isBot ?? false}
             botLevel={layout.right?.botLevel ?? null}
@@ -494,24 +626,27 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
             onBotSeat={sendBotSeat}
             onBotRemove={sendBotRemove}
             backs={backsFor(layout.right?.seat ?? -1, layout.right !== null)}
+            openCards={openCardsFor(layout.right?.seat)}
+            onOpenCardClick={partnerClickFor(layout.right?.seat)}
+            tricks={tricksFor(layout.right?.seat ?? -1)}
             balloon={balloons.right ?? null}
+            playState={playStateFor(layout.right?.seat)}
           />
 
           <SeatPlate
             position="self"
             nickname={layout.bottom?.nickname ?? null}
-            role={
-              layout.bottom
-                ? seatRole(layout.bottom.seat, layout.bottom.isHost)
-                : "пустует"
-            }
+            role={layout.bottom ? seatRole(layout.bottom.isHost) : "пустует"}
             online={layout.bottom?.online ?? null}
             isBot={layout.bottom?.isBot ?? false}
             botLevel={layout.bottom?.botLevel ?? null}
             isMe={layout.bottomIsMe}
             isHost={layout.meIsHost}
             backs={0}
+            openCards={openCardsFor(layout.bottom?.seat)}
+            tricks={tricksFor(layout.bottom?.seat ?? -1)}
             balloon={balloons.self ?? null}
+            playState={playStateFor(layout.bottom?.seat)}
           />
         </div>
 
@@ -528,7 +663,10 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
             discardPick={discardPick}
             lastResult={lastResult}
             onBid={sendBid}
+            onMisere={sendMisere}
             onPass={sendPass}
+            onPrikupAck={sendPrikupAck}
+            onTrickAck={sendTrickAck}
             onDeclare={sendDeclare}
             onWhist={sendWhist}
             onReady={sendReady}

@@ -2,7 +2,9 @@
 
 import { useState } from "react"
 
+import { toCardModel } from "@/components/cards/card-code"
 import { PlayingCard } from "@/components/cards/playing-card"
+import type { Card } from "@/lib/preference/cards"
 import { deckStyle } from "@/lib/format"
 
 export type SeatPosition = "self" | "left" | "right" | "dummy"
@@ -11,6 +13,17 @@ const BOT_LEVEL_LABEL: Record<string, string> = {
   NOVICE: "новичок",
   PLAYER: "игрок",
   MASTER: "мастер",
+}
+
+/** «1 взятка / 2 взятки / 5 взяток» — по правилам русского множественного. */
+function tricksLabel(count: number): string {
+  const mod10 = count % 10
+  const mod100 = count % 100
+  if (mod10 === 1 && mod100 !== 11) return `${count} взятка`
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${count} взятки`
+  }
+  return `${count} взяток`
 }
 
 export type SeatPlateProps = {
@@ -22,6 +35,12 @@ export type SeatPlateProps = {
   isMe?: boolean
   /** Сколько рубашек карт нарисовать у места. */
   backs?: number
+  /** Открытые карты места (мизер, одиночный вист): вместо рубашек — лицом вверх. */
+  openCards?: Card[] | null
+  /** Клик по открытой карте: только для чужой руки, которой я веду (одиночный вист). */
+  onOpenCardClick?: (card: Card) => void
+  /** Взяток на руках в этой раздаче: undefined — не показывать. */
+  tricks?: number
   /** Место принадлежит боту. */
   isBot?: boolean
   /** Уровень бота. */
@@ -38,6 +57,8 @@ export type SeatPlateProps = {
   seat?: number
   /** Реплика над табличкой: заказ игры или пас. */
   balloon?: { text: string; tone: "bid" | "pass" } | null
+  /** Статус в раздаче: игра / вист / пас — висит до записи раздачи. */
+  playState?: { text: string; tone: "game" | "whist" | "pass" } | null
 }
 
 export function SeatPlate({
@@ -47,6 +68,9 @@ export function SeatPlate({
   online,
   isMe = false,
   backs = 0,
+  openCards = null,
+  onOpenCardClick,
+  tricks,
   isBot = false,
   botLevel = null,
   isHost = false,
@@ -55,6 +79,7 @@ export function SeatPlate({
   onBotRemove,
   seat = -1,
   balloon = null,
+  playState = null,
 }: SeatPlateProps) {
   const empty = nickname === null
   const initial = nickname ? Array.from(nickname)[0]?.toUpperCase() : "·"
@@ -81,7 +106,35 @@ export function SeatPlate({
       data-me={isMe}
       data-empty={empty}
     >
-      {backs > 0 ? (
+      {openCards && openCards.length > 0 ? (
+        <div className="seat__backs seat__backs--open" aria-hidden={!onOpenCardClick}>
+          {openCards.map((card, index) => {
+            const offset = index - (openCards.length - 1) / 2
+            const face = (
+              <PlayingCard
+                card={toCardModel(card)}
+                size="xs"
+                style={deckStyle(offset * 9, Math.abs(offset) * 1.6)}
+              />
+            )
+            return onOpenCardClick ? (
+              <button
+                key={card}
+                type="button"
+                className="seat__open-card"
+                title="ход картой пасующего"
+                onClick={() => onOpenCardClick(card)}
+              >
+                {face}
+              </button>
+            ) : (
+              <div key={card} className="seat__open-card">
+                {face}
+              </div>
+            )
+          })}
+        </div>
+      ) : backs > 0 ? (
         <div className="seat__backs" aria-hidden="true">
           {Array.from({ length: backs }, (_, index) => {
             const offset = index - (backs - 1) / 2
@@ -108,6 +161,23 @@ export function SeatPlate({
           {isBot ? "💻 " : ""}{nickname ?? "свободное место"}
         </span>
         <span className="seat__role">{role}</span>
+        {playState ? (
+          <span
+            className="seat__badge seat__badge--state"
+            data-tone={playState.tone}
+            title="статус в раздаче"
+          >
+            {playState.text}
+          </span>
+        ) : null}
+        {tricks !== undefined ? (
+          <span
+            className="seat__badge seat__badge--tricks"
+            title="взятки в этой раздаче"
+          >
+            {tricksLabel(tricks)}
+          </span>
+        ) : null}
         {isBot && botLevel ? (
           <span className="seat__badge seat__badge--bot">
             компьютер · {BOT_LEVEL_LABEL[botLevel] ?? botLevel}

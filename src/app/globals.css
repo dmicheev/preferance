@@ -1260,6 +1260,30 @@ button {
   margin-left: 0;
 }
 
+/* Открытые карты (мизер, одиночный вист): веер шире, чтобы был читаем угол карты. */
+.seat__backs--open > * {
+  margin-left: -10px;
+}
+
+.seat__backs--open > *:first-child {
+  margin-left: 0;
+}
+
+/* Кликабельная карта пасующего: кнопка без собственной рамки. */
+.seat__open-card {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+button.seat__open-card:hover .card,
+button.seat__open-card:focus-visible .card {
+  outline: 2px solid rgba(255, 213, 128, 0.85);
+  outline-offset: 1px;
+}
+
 /* ---------- боты ---------- */
 
 .seat--bot .seat__avatar {
@@ -1281,6 +1305,32 @@ button {
   color: #cdd8ea;
   border: 1px solid rgba(184, 196, 216, 0.35);
   background: rgba(122, 138, 168, 0.18);
+}
+
+/* взятки в текущей раздаче — тёплым тоном под свечу */
+.seat__badge--tricks {
+  color: #f0dfae;
+  border: 1px solid rgba(201, 168, 106, 0.4);
+  background: rgba(201, 168, 106, 0.14);
+}
+
+/* статус в раздаче: игра / вист / пас */
+.seat__badge--state[data-tone="game"] {
+  color: #f0dfae;
+  border: 1px solid rgba(201, 168, 106, 0.55);
+  background: rgba(201, 168, 106, 0.18);
+}
+
+.seat__badge--state[data-tone="whist"] {
+  color: #9fe0bd;
+  border: 1px solid rgba(121, 214, 164, 0.45);
+  background: rgba(121, 214, 164, 0.12);
+}
+
+.seat__badge--state[data-tone="pass"] {
+  color: var(--text-3);
+  border: 1px solid rgba(139, 129, 114, 0.35);
+  background: rgba(139, 129, 114, 0.12);
 }
 
 .seat__bot-controls {
@@ -1487,6 +1537,7 @@ button {
   margin-left: clamp(-22px, -1.4vw, -8px);
   transform-origin: bottom center;
   animation: cardDeal 520ms cubic-bezier(0.2, 0.9, 0.24, 1) backwards;
+  cursor: pointer;
 }
 
 .hand__slot:first-child {
@@ -1497,9 +1548,11 @@ button {
   z-index: 3;
 }
 
+/* наведение: карта приподнимается, светлеет и получает тёплый контур */
 .hand__slot:hover .card {
   transform: translateY(-18px) rotate(0deg) scale(1.03);
-  filter: drop-shadow(0 16px 22px rgba(0, 0, 0, 0.55));
+  filter: brightness(1.18) saturate(1.08) drop-shadow(0 16px 22px rgba(0, 0, 0, 0.55));
+  box-shadow: 0 0 0 2px rgba(239, 220, 176, 0.75), 0 0 20px rgba(255, 214, 130, 0.45);
   z-index: 4;
 }
 
@@ -1935,6 +1988,52 @@ button {
   box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.85);
 }
 
+/* карта влетает на сукно со стороны игравшего */
+.trick__slot--self .card {
+  animation: cardFlySelf 430ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.trick__slot--left .card {
+  animation: cardFlyLeft 430ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.trick__slot--right .card {
+  animation: cardFlyRight 430ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes cardFlySelf {
+  from {
+    opacity: 0;
+    transform: translateY(340px) rotate(16deg) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes cardFlyLeft {
+  from {
+    opacity: 0;
+    transform: translate(-480px, 90px) rotate(-24deg) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes cardFlyRight {
+  from {
+    opacity: 0;
+    transform: translate(480px, 90px) rotate(24deg) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(1);
+  }
+}
+
 .prikup {
   position: absolute;
   left: 50%;
@@ -1943,8 +2042,15 @@ button {
   display: flex;
 }
 
+/* прикуп — в один размер с картами на сукне */
+.prikup .card {
+  --card-w: 62px;
+  height: calc(var(--card-w) * 1.42);
+  box-shadow: 0 12px 24px -10px rgba(0, 0, 0, 0.85);
+}
+
 .prikup .card + .card {
-  margin-left: -10px;
+  margin-left: -12px;
 }
 
 .actions {
@@ -1971,6 +2077,41 @@ button {
   backdrop-filter: blur(8px);
   text-align: center;
   animation: fadeUp 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* минимальный док подтверждения «Ок»: только кнопка, без панели */
+.actions--thin {
+  width: auto;
+  gap: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* «твой ход» в розыгрыше: одна строка без панели — табличку игрока не трогает.
+   Специфичность .actions.actions--play — чтобы мобильные паддинги .actions не вернулись. */
+.actions.actions--play {
+  width: auto;
+  max-width: 92vw;
+  gap: 0;
+  padding: 0 12px;
+  border: none;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.actions--play .actions__status {
+  margin: 0;
+  font-size: 1.06rem;
+  letter-spacing: 0.02em;
+  color: var(--brass-3);
+  text-shadow:
+    0 1px 10px rgba(0, 0, 0, 0.95),
+    0 0 6px rgba(0, 0, 0, 0.85);
 }
 
 .actions__status {
@@ -2016,9 +2157,13 @@ button {
   color: var(--brass-3);
 }
 
+/* перекрытая чужой ставкой комбинация не выглядит выбранной */
 .action-chip:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+  background: rgba(201, 168, 106, 0.06);
+  border-color: rgba(201, 168, 106, 0.24);
+  color: var(--text-2);
 }
 
 .actions__summary {
@@ -2174,6 +2319,10 @@ button {
 }
 
 /* негодные карты приглушены, выбранные на снос — подняты */
+.hand__slot--dimmed {
+  cursor: not-allowed;
+}
+
 .hand__slot--dimmed .card {
   filter: grayscale(0.55) brightness(0.7);
 }
@@ -2184,6 +2333,7 @@ button {
   box-shadow: none;
 }
 
+/* выбранная на снос карта поднята и обведена; при наведении тоже светлеет */
 .hand__slot--selected .card {
   transform: translateY(-16px) rotate(0deg) scale(1.02);
   box-shadow:
@@ -2193,6 +2343,11 @@ button {
 
 .hand__slot--selected:hover .card {
   transform: translateY(-16px) rotate(0deg) scale(1.02);
+  filter: brightness(1.18) saturate(1.08);
+  box-shadow:
+    0 0 0 2px rgba(239, 220, 176, 0.9),
+    0 0 22px rgba(255, 214, 130, 0.5),
+    0 16px 24px -12px rgba(0, 0, 0, 0.85);
 }
 
 @media (max-width: 760px) {

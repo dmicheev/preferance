@@ -105,7 +105,7 @@ const driver = setInterval(() => {
   const signature = `#${states.length}:${
     round.phase === "scored"
       ? `scored:${snapshot.readyUserIds.length}`
-      : `${round.phase}:${round.turn}:${round.discardCount}:${round.trick.length}:${round.bids.map((bid) => (bid === null ? "-" : bid === "pass" ? "p" : "b")).join("")}`
+      : `${round.phase}:${round.turn ?? "wait"}:${round.discardCount}:${round.prikupAck.length}:${round.trickAck.length}:${round.trick.length}:${round.bids.map((bid) => (bid === null ? "-" : bid === "pass" ? "p" : "b")).join("")}`
   }`
   if (signature === lastSignature) return
   lastSignature = signature
@@ -116,6 +116,22 @@ const driver = setInterval(() => {
     }
     return
   }
+  // Прикуп открыт: Ок жмут все, включая человека за третьим стулом.
+  if (round.phase === "declaring" && round.prikupAck.length < 3) {
+    if (!round.prikupAck.includes(snapshot.mySeat)) {
+      anna.emit("game:prikup-ack", {})
+    }
+    return
+  }
+
+  // Взятка сошлась: Ок жмут все, включая человека за третьим стулом.
+  if (round.phase === "play" && round.turn === null) {
+    if (!round.trickAck.includes(snapshot.mySeat)) {
+      anna.emit("game:trick-ack", {})
+    }
+    return
+  }
+
   if (round.turn !== snapshot.mySeat) return
 
   if (round.phase === "bidding") {

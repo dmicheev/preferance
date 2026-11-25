@@ -47,7 +47,7 @@ setInterval(() => {
     const signature =
       round.phase === "scored"
         ? `scored:${snapshot.readyUserIds.length}`
-        : `${round.phase}:${round.turn}:${round.discardCount}:${round.trick.length}:${round.bids.map((bid) => (bid === null ? "-" : bid === "pass" ? "p" : "b")).join("")}`
+        : `${round.phase}:${round.turn ?? "wait"}:${round.discardCount}:${round.prikupAck.length}:${round.trickAck.length}:${round.trick.length}:${round.bids.map((bid) => (bid === null ? "-" : bid === "pass" ? "p" : "b")).join("")}`
 
     if (socket.lastSignature === signature) continue
     socket.lastSignature = signature
@@ -57,6 +57,11 @@ setInterval(() => {
         socket.emit("game:bid", { level: 6, trump: "S" })
       } else {
         socket.emit("game:pass", {})
+      }
+    } else if (round.phase === "declaring" && round.prikupAck.length < 3) {
+      // Прикуп открыт: Ок жмут оба бота, снос после последнего.
+      if (!round.prikupAck.includes(snapshot.mySeat)) {
+        socket.emit("game:prikup-ack", {})
       }
     } else if (
       round.phase === "declaring" &&
@@ -69,6 +74,11 @@ setInterval(() => {
       })
     } else if (round.phase === "whist" && round.turn === snapshot.mySeat) {
       socket.emit("game:whist", { whist: false })
+    } else if (round.phase === "play" && round.turn === null) {
+      // Взятка сошлась: Ок жмут оба бота, потом победитель ходит.
+      if (!round.trickAck.includes(snapshot.mySeat)) {
+        socket.emit("game:trick-ack", {})
+      }
     } else if (round.phase === "play" && round.turn === snapshot.mySeat) {
       const card = snapshot.myLegalMoves[0]
       if (card) socket.emit("game:card", { card })

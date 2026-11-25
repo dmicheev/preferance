@@ -79,7 +79,7 @@ const BID_GLYPHS: Record<string, string> = {
   NT: "бк",
 }
 
-/** Компактный заказ для реплики над местом: «6♠», «9♦», «10бк». */
+/** Компактный заказ для реплики над местом: «6♠», «9♦», «10бк», «мизер». */
 export function bidText(bid: Bid): string {
-  return `${bid.level}${BID_GLYPHS[bid.trump] ?? ""}`
+  return "kind" in bid ? "мизер" : `${bid.level}${BID_GLYPHS[bid.trump] ?? ""}`
 }
