@@ -41,9 +41,12 @@ export function HandFan({
         const arc = Math.abs(offset) * 2.3
         const isPlayable = playable ? playable.has(card) : true
         const isSelected = selected?.has(card) ?? false
+        // карта начинает новую масть — веер разрывается, группы читаются раздельно
+        const startsSuit = index > 0 && card[0] !== cards[index - 1][0]
 
         const slotClass = [
           "hand__slot",
+          startsSuit ? "hand__slot--new-suit" : null,
           isPlayable ? null : "hand__slot--dimmed",
           isSelected ? "hand__slot--selected" : null,
         ]

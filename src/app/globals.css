@@ -1544,6 +1544,11 @@ button.seat__open-card:focus-visible .card {
   margin-left: 0;
 }
 
+/* первая карта новой масти: разрываем веер, чтобы группы мастей читались */
+.hand__slot--new-suit {
+  margin-left: clamp(12px, 1.6vw, 22px);
+}
+
 .hand__slot:hover {
   z-index: 3;
 }
