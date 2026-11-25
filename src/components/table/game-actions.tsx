@@ -54,6 +54,17 @@ export function GameActions({
   const [bidLevel, setBidLevel] = useState<number>(MIN_LEVEL)
   const [bidTrump, setBidTrump] = useState<Trump>("S")
 
+  // Новая раздача — заказ сбрасывается на 6♠: выбор прошлой торговли
+  // или подъёма прикупа не должен подсвечиваться в свежей торговле.
+  // roundsPlayed меняется один раз между раздачами (при записи итогов);
+  // сброс во время рендера — штатная альтернатива эффекту без каскадов.
+  const [scoredRounds, setScoredRounds] = useState(snapshot.roundsPlayed)
+  if (scoredRounds !== snapshot.roundsPlayed) {
+    setScoredRounds(snapshot.roundsPlayed)
+    setBidLevel(MIN_LEVEL)
+    setBidTrump("S")
+  }
+
   const me = snapshot.players.find((player) => player.seat === snapshot.mySeat)
   const nicknameOf = (seat: Seat | null) =>
     snapshot.players.find((player) => player.seat === seat)?.nickname ?? "—"
