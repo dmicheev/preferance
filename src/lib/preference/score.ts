@@ -2,15 +2,24 @@
 // Сами цифры живут в Ruleset (rules.ts): пресет по умолчанию или выбор хозяина стола.
 
 import { GAME_LEVELS, PLAYER_COUNT } from "./constants"
-import type { RoundOutcome, Seat } from "./round"
+import { otherSeats, type RoundOutcome, type Seat } from "./round"
 import {
   DEFAULT_RULESET,
   gameValue,
+  valueLevel,
   whistRate,
+  whistShortfall,
   type Ruleset,
 } from "./rules"
 
-export { DEFAULT_RULESET, gameValue, whistRate, type Ruleset }
+export {
+  DEFAULT_RULESET,
+  gameValue,
+  valueLevel,
+  whistRate,
+  whistShortfall,
+  type Ruleset,
+}
 
 export type ScoreEntry = {
   /** Очки в пуле: закрытая пуля = победа. */
@@ -91,20 +100,34 @@ export function applyRoundScore(
       const { level } = outcome.contract
       const taken = outcome.tricks[declarer]
       const need = level
+      // Пуля, подсад и ставка вистов у бескозырки — по уровню выше.
+      const cost = valueLevel(level, outcome.contract.trump)
+      const price = gameValue(cost, rules)
 
       if (taken >= need) {
-        addPool(declarer, gameValue(level, rules))
+        addPool(declarer, price)
       } else {
-        addMountain(
-          declarer,
-          (need - taken) * rules.shortfallFactor * gameValue(level, rules),
-        )
+        addMountain(declarer, (need - taken) * rules.shortfallFactor * price)
       }
 
-      const rate = whistRate(level, outcome.whisters.length, rules)
-      for (const seat of outcome.whisters) {
-        addWhists(seat, outcome.tricks[seat] * rate)
-      }
+      const rate = whistRate(cost, outcome.whisters.length, rules)
+      // Одиночный вист: вистующий играл за себя и за пасующего —
+      // взятки, взятые на обеих руках, пишутся вистующему.
+      const wonByWhisters = outcome.whisters.map((seat) => {
+        let won = outcome.tricks[seat]
+        if (outcome.whisters.length === 1) {
+          const passer = otherSeats(declarer).find((item) => item !== seat)
+          if (passer !== undefined) won += outcome.tricks[passer]
+        }
+        addWhists(seat, won * rate)
+        return won
+      })
+
+      // Недобор на висте: каждая недобранная до минимума взятка — в гору по цене игры.
+      const shortfall = whistShortfall(level, wonByWhisters)
+      outcome.whisters.forEach((seat, index) => {
+        if (shortfall[index] > 0) addMountain(seat, shortfall[index] * price)
+      })
       raspasStep = rules.raspasBase
       break
     }

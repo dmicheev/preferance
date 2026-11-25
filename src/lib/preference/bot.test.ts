@@ -3,7 +3,8 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import { createRound, type RoundState, type Seat } from "./round"
-import { chooseAction, normalizeBotLevel, type BotLevel } from "./bot"
+import { chooseAction, isMisereClean, normalizeBotLevel, type BotLevel } from "./bot"
+import type { Card } from "./cards"
 
 const SEED = 42
 
@@ -88,6 +89,7 @@ test("все уровни: снос ровно две карты из руки",
       turn: 0 as Seat,
       hands: [hand, [], []],
       declarer: 0 as Seat,
+      prikupAck: [0 as Seat, 1 as Seat, 2 as Seat],
       highest: { seat: 0 as Seat, bid: { level: 6, trump: "S" } },
     })
     const action = chooseAction(round, 0 as Seat, level)
@@ -100,6 +102,39 @@ test("все уровни: снос ровно две карты из руки",
       assert.notEqual(action.discard[0], action.discard[1])
     }
   }
+})
+
+test("прикуп открыт: бот жмёт Ок, пока не все посмотрели", () => {
+  const hand = ["SA", "SK", "SQ", "SJ", "S10", "HA", "HK", "HQ", "HJ", "D7"]
+  const round = makeRound({
+    phase: "declaring",
+    turn: 0 as Seat,
+    hands: [hand, [], []],
+    declarer: 0 as Seat,
+    prikupAck: [],
+    highest: { seat: 0 as Seat, bid: { level: 6, trump: "S" } },
+  })
+
+  const action = chooseAction(round, 0 as Seat, "MASTER")
+  assert.equal(action.type, "prikup-ack")
+  if (action.type === "prikup-ack") assert.equal(action.seat, 0 as Seat)
+})
+
+test("взятка сошлась: бот жмёт Ок, пока не все посмотрели", () => {
+  const round = makeRound({
+    phase: "play",
+    turn: null,
+    hands: [["SA", "SK"], ["H7"], ["DA"]],
+    trick: [],
+    trickAck: [1 as Seat],
+    history: [
+      { cards: [{ seat: 1, card: "H7" }, { seat: 2, card: "D7" }, { seat: 0, card: "SA" }], winner: 0 as Seat },
+    ],
+  } as unknown as RoundState)
+
+  const action = chooseAction(round, 0 as Seat, "MASTER")
+  assert.equal(action.type, "trick-ack")
+  if (action.type === "trick-ack") assert.equal(action.seat, 0 as Seat)
 })
 
 test("ход картой: всегда из legalMoves (масть хода обязана)", () => {
@@ -205,6 +240,140 @@ test("мизер: своим ходом идёт младшей картой р�
   assert.equal(action.type, "play")
   if (action.type === "play") {
     assert.equal(action.card, "H7")
+  }
+})
+
+test("мизер: чистая рука — PLAYER и MASTER заявляют мизер в торговле", () => {
+  // Ренонсов нет ни в одной масти, все карты младше накрывающих снаружи.
+  const hand: Card[] = ["S7", "S8", "H7", "H8", "D7", "D8", "D9", "D10", "C7", "C8"]
+  assert.ok(isMisereClean(hand))
+
+  for (const level of ["PLAYER", "MASTER"] as BotLevel[]) {
+    const round = makeRound({
+      phase: "bidding",
+      turn: 0 as Seat,
+      hands: [hand, [], []],
+      bids: [null, null, null],
+      highest: null,
+    })
+    const action = chooseAction(round, 0 as Seat, level)
+    assert.deepEqual(action, { type: "misere", seat: 0 as Seat })
+  }
+
+  // Поверх чужого мизера или заказа выше шестёрки мизер мёртв — пас.
+  const vsMisere = makeRound({
+    phase: "bidding",
+    turn: 0 as Seat,
+    hands: [hand, [], []],
+    bids: [null, { kind: "misere" } as never, null],
+    highest: { seat: 1 as Seat, bid: { kind: "misere" } },
+  })
+  const dodged = chooseAction(vsMisere, 0 as Seat, "PLAYER")
+  assert.equal(dodged.type, "pass")
+})
+
+test("мизер: с сносом рука становится чистой — PLAYER объявляет мизер, NOVICE играет", () => {
+  const hand: Card[] = [
+    "S7", "S8", "SA", "H7", "H8", "D7", "D8", "D9", "D10", "C7", "C8", "C9",
+  ]
+  const round = makeRound({
+    phase: "declaring",
+    turn: 0 as Seat,
+    hands: [hand, [], []],
+    declarer: 0 as Seat,
+    prikupAck: [0 as Seat, 1 as Seat, 2 as Seat],
+    highest: { seat: 0 as Seat, bid: { level: 6, trump: "S" } },
+  })
+
+  const player = chooseAction(round, 0 as Seat, "PLAYER")
+  assert.equal(player.type, "declare")
+  if (player.type === "declare") {
+    assert.equal(player.contract, "misere")
+    assert.equal(player.discard.length, 2)
+    for (const card of player.discard) {
+      assert.ok(hand.includes(card), `карта сноса ${card} не из руки`)
+    }
+    const rest = hand.filter((card) => !player.discard.includes(card))
+    assert.ok(isMisereClean(rest), "после сноса рука должна остаться чистой")
+  }
+
+  const novice = chooseAction(round, 0 as Seat, "NOVICE")
+  assert.equal(novice.type, "declare")
+  if (novice.type === "declare") assert.equal(novice.contract, "game")
+})
+
+test("прикуп: сильная рука поднимает заказ, слабая играет заказанное", () => {
+  // 4 пики с онёрами и онёры в остальных мастях — рука тянет уровень выше.
+  const strong: Card[] = [
+    "SA", "SK", "SQ", "S7", "HA", "HK", "DA", "DK", "CA", "CK", "H7", "D7",
+  ]
+  const strongRound = makeRound({
+    phase: "declaring",
+    turn: 0 as Seat,
+    hands: [strong, [], []],
+    declarer: 0 as Seat,
+    prikupAck: [0 as Seat, 1 as Seat, 2 as Seat],
+    highest: { seat: 0 as Seat, bid: { level: 6, trump: "S" } },
+  })
+
+  const player = chooseAction(strongRound, 0 as Seat, "PLAYER")
+  assert.equal(player.type, "declare")
+  if (player.type === "declare") {
+    assert.equal(player.contract, "game")
+    assert.deepEqual(
+      { level: player.level, trump: player.trump },
+      { level: 7, trump: "S" },
+      "сильная рука поднимает заказ уровнем",
+    )
+    for (const card of player.discard) {
+      assert.ok(strong.includes(card), `карта сноса ${card} не из руки`)
+    }
+  }
+
+  // Новичок заказанное не поднимает.
+  const novice = chooseAction(strongRound, 0 as Seat, "NOVICE")
+  assert.equal(novice.type, "declare")
+  if (novice.type === "declare") {
+    assert.equal(novice.contract, "game")
+    assert.equal(novice.level, undefined)
+    assert.equal(novice.trump, undefined)
+  }
+
+  // Онёра без поддержки — мизер не спасти и уровень не поднять: играет заказанную шестёрку.
+  const weak: Card[] = [
+    "SA", "HA", "DA", "S7", "S8", "H7", "H8", "D7", "D8", "C7", "C8", "C9",
+  ]
+  const weakRound = makeRound({
+    phase: "declaring",
+    turn: 0 as Seat,
+    hands: [weak, [], []],
+    declarer: 0 as Seat,
+    prikupAck: [0 as Seat, 1 as Seat, 2 as Seat],
+    highest: { seat: 0 as Seat, bid: { level: 6, trump: "S" } },
+  })
+  const cautious = chooseAction(weakRound, 0 as Seat, "PLAYER")
+  assert.equal(cautious.type, "declare")
+  if (cautious.type === "declare") {
+    assert.equal(cautious.contract, "game")
+    assert.equal(cautious.level, undefined)
+    assert.equal(cautious.trump, undefined)
+  }
+})
+
+test("мизер: защитник против мизера берёт взятку, а не уклоняется", () => {
+  const round = makeRound({
+    phase: "play",
+    turn: 0 as Seat,
+    contract: { kind: "misere" },
+    declarer: 1 as Seat,
+    hands: [["HA", "H7", "D9"], [], []],
+    trick: [{ seat: 1 as Seat, card: "H10" }],
+  } as unknown as RoundState)
+
+  const action = chooseAction(round, 0 as Seat, "MASTER")
+  assert.equal(action.type, "play")
+  if (action.type === "play") {
+    assert.equal(action.card, "HA", "защитник должен бить старшей")
   }
 })
 

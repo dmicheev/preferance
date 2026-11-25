@@ -1,7 +1,8 @@
 // Пресет очков Ленинградки. Все цифры — здесь, и они же настраиваются
 // при создании стола: что выбрал хозяин, то и лежит в Game.rules.
 
-import { GAME_LEVELS } from "./constants"
+import { GAME_LEVELS, MAX_LEVEL } from "./constants"
+import type { Trump } from "./cards"
 
 export type GameLevel = 6 | 7 | 8 | 9 | 10
 
@@ -50,6 +51,15 @@ export function gameValue(level: number, rules: Ruleset): number {
 }
 
 /**
+ * Расчётный уровень игры: без козыря считается на порядок старше и стоит
+ * как игра уровнем выше — 6БК как семёрная, 7БК как восьмерная…
+ * 10БК остаётся десятой, старше в Ленинградке нет.
+ */
+export function valueLevel(level: number, trump: Trump): number {
+  return trump === "NT" ? Math.min(level + 1, MAX_LEVEL) : level
+}
+
+/**
  * Висты за взятку: на шестерной — своя цена, на 7–10 — своя.
  * Один вистующий пишет по отдельной ставке («джентльменский вист»).
  */
@@ -60,6 +70,35 @@ export function whistRate(
 ): number {
   if (whisters <= 1) return rules.singleWhistRate
   return level === 6 ? rules.whistRateSix : rules.whistRateHigh
+}
+
+/** Норма одиночного вистующего: шестёрная — 4, семёрная и восьмёрная — 2, девятная — 1. */
+const WHIST_QUOTA_SOLO: Record<number, number> = { 6: 4, 7: 2, 8: 2, 9: 1 }
+/** Норма «на двоих»: семёрная и восьмёрная — 2, девятная — 1. */
+const WHIST_QUOTA_PAIRED: Record<number, number> = { 7: 2, 8: 2, 9: 1 }
+
+/**
+ * Сколько взяток не добрал каждый вистующий — за каждую в гору по цене игры.
+ * На шестёрной норма персональная: по 2 взятки с каждого. Один вистующий
+ * отвечает за всю норму: 4 на шестёрной, 2 на семёрной и восьмёрной,
+ * 1 на девятной. На семёрной, восьмёрной и девятной норма «на двоих»:
+ * важен суммарный набор, а недобор пишется каждому вистующему полностью.
+ * Десятая игра требования не имеет; бескозырка — по своему порядку
+ * (6БК — как шестёрная), платится по цене бескозырки.
+ */
+export function whistShortfall(level: number, taken: number[]): number[] {
+  if (taken.length === 0) return []
+  if (taken.length === 1) {
+    const quota = WHIST_QUOTA_SOLO[level] ?? 0
+    return [Math.max(0, quota - taken[0])]
+  }
+  if (level === 6) {
+    return taken.map((tricks) => Math.max(0, 2 - tricks))
+  }
+  const quota = WHIST_QUOTA_PAIRED[level] ?? 0
+  const total = taken.reduce((sum, tricks) => sum + tricks, 0)
+  const deficit = Math.max(0, quota - total)
+  return taken.map(() => deficit)
 }
 
 /**

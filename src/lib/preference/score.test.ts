@@ -10,6 +10,7 @@ import {
   gameValue,
   isBulletClosed,
   whistRate,
+  whistShortfall,
 } from "./score"
 import type { RoundOutcome, Seat } from "./round"
 
@@ -68,7 +69,153 @@ test("подсад: двойная стоимость за каждую недо
   // (7 - 5) * 2 * 4 = 16
   assert.equal(result.table.entries[0].mountain, 16)
   assert.equal(result.table.entries[0].pool, 0)
-  assert.equal(result.table.entries[1].whists, 3)
+  // Одиночный вист: вистующий играл за двоих — 3 взятки на своей руке
+  // и 2 на руке пасующего, все в его вистах.
+  assert.equal(result.table.entries[1].whists, 5)
+})
+
+test("одиночный вист: вистующий пишет висты за взятки с обеих рук", () => {
+  const result = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 6, trump: "S" },
+      declarer: 1,
+      // Играющий взял 3; на руках вистующего (место 2) и пасующего (место 0) — 7.
+      tricks: [3, 3, 4],
+      whisters: [2],
+    }),
+  )
+  // Ставка одиночного виста на шестерной — 1 вист за взятку: 7 × 1.
+  assert.equal(result.table.entries[2].whists, 7)
+})
+
+test("недобор на висте: шестерная — по 2 взятки с каждого", () => {
+  const result = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 6, trump: "S" },
+      declarer: 1,
+      tricks: [1, 7, 2],
+      whisters: [0, 2],
+    }),
+  )
+  // Норма персональная: первый взял 1 из 2 — одна недобранная по цене игры.
+  assert.equal(result.table.entries[0].mountain, 2)
+  assert.equal(result.table.entries[2].mountain, 0, "норма выполнена")
+  // Висты считаются как раньше: 1 × 2 и 2 × 2.
+  assert.deepEqual(
+    result.table.entries.map((entry) => entry.whists),
+    [2, 0, 4],
+  )
+})
+
+test("недобор на висте: одиночка на шестерной отвечает за 4 взятки", () => {
+  const result = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 6, trump: "S" },
+      declarer: 1,
+      // Вистующий играл за двоих: 2 на руке пасующего + 1 своя = 3 из 4 нужных.
+      tricks: [2, 7, 1],
+      whisters: [2],
+    }),
+  )
+  assert.equal(result.table.entries[2].mountain, 2)
+})
+
+test("недобор на висте: 7 и 8 — строго 2 на двоих, недобор каждому", () => {
+  const made = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 8, trump: "C" },
+      declarer: 0,
+      // Все 2 взятки у одного вистующего — на двоих достаточно.
+      tricks: [8, 2, 0],
+      whisters: [1, 2],
+    }),
+  )
+  assert.equal(made.table.entries[1].mountain, 0)
+  assert.equal(made.table.entries[2].mountain, 0)
+
+  const short = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 7, trump: "H" },
+      declarer: 0,
+      tricks: [8, 1, 0],
+      whisters: [1, 2],
+    }),
+  )
+  // Вместе 1 из 2: каждая недобранная — каждому по полной цене семёрной.
+  assert.equal(short.table.entries[1].mountain, 4)
+  assert.equal(short.table.entries[2].mountain, 4)
+})
+
+test("недобор на висте: девятная — 1 на двоих, десятая — без требования", () => {
+  const nine = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 9, trump: "S" },
+      declarer: 0,
+      tricks: [9, 1, 0],
+      whisters: [1, 2],
+    }),
+  )
+  // Единственную взятку взял первый — на двоих достаточно.
+  assert.equal(nine.table.entries[1].mountain, 0)
+  assert.equal(nine.table.entries[2].mountain, 0)
+
+  const empty = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 9, trump: "D" },
+      declarer: 0,
+      tricks: [10, 0, 0],
+      whisters: [1, 2],
+    }),
+  )
+  // Ни одной на двоих: каждому по полной цене девятной.
+  assert.equal(empty.table.entries[1].mountain, 8)
+  assert.equal(empty.table.entries[2].mountain, 8)
+
+  const ten = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 10, trump: "S" },
+      declarer: 0,
+      tricks: [10, 0, 0],
+      whisters: [1, 2],
+    }),
+  )
+  assert.equal(ten.table.entries[1].mountain, 0, "десятая без требования")
+  assert.equal(ten.table.entries[2].mountain, 0)
+})
+
+test("недобор на бескозырке: норма по порядку игры, цена — по стоимости БК", () => {
+  const result = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 6, trump: "NT" },
+      declarer: 1,
+      tricks: [1, 8, 1],
+      whisters: [0, 2],
+    }),
+  )
+  // Норма как на шестёрной — по 2 с каждого; цена недобора — как семёрной (4).
+  assert.equal(result.table.entries[0].mountain, 4)
+  assert.equal(result.table.entries[2].mountain, 4)
+})
+
+test("нормы виста: таблица недобора", () => {
+  assert.deepEqual(whistShortfall(6, [2, 2]), [0, 0])
+  assert.deepEqual(whistShortfall(6, [1, 2]), [1, 0])
+  assert.deepEqual(whistShortfall(6, [3]), [1])
+  assert.deepEqual(whistShortfall(7, [2, 0]), [0, 0], "на двоих достаточно")
+  assert.deepEqual(whistShortfall(8, [1, 0]), [1, 1], "недобор пишется каждому")
+  assert.deepEqual(whistShortfall(8, [2]), [0])
+  assert.deepEqual(whistShortfall(9, [1, 0]), [0, 0])
+  assert.deepEqual(whistShortfall(9, [0]), [1])
+  assert.deepEqual(whistShortfall(10, [0, 0]), [0, 0], "десятая без требования")
 })
 
 test("мизер: чистая пуля или двойной штраф за взятки", () => {
@@ -193,6 +340,38 @@ test("итоги по местам считаются по одному разу
   )
 })
 
+test("бескозырка дороже: 6БК платит как семёрная, 10БК не выше десятной", () => {
+  const six = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 6, trump: "NT" },
+      declarer: 1,
+      tricks: [2, 7, 1],
+      whisters: [0, 2],
+    }),
+  )
+  // 6БК = семёрная: 4 в пулю, висты по ставке 7–10 (по 1 за взятку).
+  assert.deepEqual(
+    six.table.entries.map((entry) => entry.pool),
+    [0, 4, 0],
+  )
+  assert.deepEqual(
+    six.table.entries.map((entry) => entry.whists),
+    [2, 0, 1],
+  )
+
+  const top = applyRoundScore(
+    createScoreTable(20),
+    outcome({
+      contract: { kind: "game", level: 10, trump: "NT" },
+      declarer: 2,
+      tricks: [0, 0, 10],
+      whisters: [],
+    }),
+  )
+  assert.equal(top.table.entries[2].pool, 10, "10БК считается десятной")
+})
+
 test("кастомные цифры: цена игр, вистов и подсада берётся из Ruleset", () => {
   const custom: Ruleset = {
     ...DEFAULT_RULESET,
@@ -218,8 +397,8 @@ test("кастомные цифры: цена игр, вистов и подса
   assert.equal(won.table.entries[1].pool, 5)
   assert.equal(
     won.table.entries[0].whists,
-    2 * 2,
-    "вист в одиночку: две взятки по своей ставке",
+    (2 + 2) * 2,
+    "одиночный вист: взятки с обеих рук по ставке вистующего",
   )
 
   const fell = applyRoundScore(

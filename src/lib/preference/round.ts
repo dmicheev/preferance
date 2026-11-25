@@ -1,8 +1,12 @@
-// Одна раздача Ленинградки: торговля → прикуп со сносом → висты → взятки.
+// Одна раздача Ленинградки: торговля → открытый прикуп (все жмут Ок) →
+// снос → висты → взятки (каждая взятка на сукне до Ок от всех).
+// На распасах прикуп заходит в первых двух взятках: каждая его карта
+// открывается в момент своей взятки и задаёт масть, но не может взять взятку.
 // Состояние — простые данные: его можно сериализовать, сравнить и пересчитать.
 
 import {
   TRUMP_ORDER,
+  TRUMPS,
   cardStrength,
   type Card,
   type Trump,
@@ -13,7 +17,13 @@ import { dealCards } from "./deal"
 
 export type Seat = 0 | 1 | 2
 
-export type Bid = { level: number; trump: Trump }
+export type Bid = { level: number; trump: Trump } | { kind: "misere" }
+
+/**
+ * Сила заявки «мизер»: старше любой девятки, младше десятой игры.
+ * Мизер перебивают только реальной десятой.
+ */
+export const MISERE_BID_STRENGTH = 9 * 10 + 5
 
 export type Contract =
   | { kind: "game"; level: number; trump: Trump }
@@ -22,7 +32,11 @@ export type Contract =
 
 export type RoundPhase = "bidding" | "declaring" | "whist" | "play" | "scored"
 
-export type TrickCard = { seat: Seat; card: Card }
+/**
+ * Карта на сукне. `fromPrikup` — заходящая карта прикупа на распасах:
+ * масть хода она задаёт, но сама взятку взять не может.
+ */
+export type TrickCard = { seat: Seat; card: Card; fromPrikup?: boolean }
 export type CompletedTrick = { cards: TrickCard[]; winner: Seat }
 
 export type RoundState = {
@@ -39,6 +53,10 @@ export type RoundState = {
   contract: Contract | null
   /** Две карты, которые играющий снёс после прикупа. */
   discard: Card[]
+  /** Кто уже посмотрел открытый прикуп: снос ждёт Ок от всех троих. */
+  prikupAck: Seat[]
+  /** Кто уже посмотрел собранную взятку: победитель ходит после всех Ок. */
+  trickAck: Seat[]
   /** null — решение ещё не принято, false — пас на вист. */
   whist: (boolean | null)[]
   trick: TrickCard[]
@@ -48,11 +66,21 @@ export type RoundState = {
 
 export type RoundAction =
   | { type: "bid"; seat: Seat; level: number; trump: Trump }
+  | { type: "misere"; seat: Seat }
   | { type: "pass"; seat: Seat }
+  | { type: "prikup-ack"; seat: Seat }
+  | { type: "trick-ack"; seat: Seat }
   | {
       type: "declare"
       seat: Seat
       contract: "game" | "misere"
+      /**
+       * Подъём после прикупа: заказанную игру оставляют как есть или поднимают
+       * выше (уровнем или мастью). Без level/trump играют заказанное;
+       * понижать нельзя, заявленный в торговле мизер не меняется вовсе.
+       */
+      level?: number
+      trump?: Trump
       discard: Card[]
     }
   | { type: "whist"; seat: Seat; whist: boolean }
@@ -69,9 +97,11 @@ export type RoundOutcome = {
   whisters: Seat[]
 }
 
-/** Сила заказа: уровень важнее масти, внутри уровня масти от пик к без козыря. */
+/** Сила заявки: мизер между девяткой без козыря и десятой. */
 export function bidStrength(bid: Bid): number {
-  return bid.level * 10 + TRUMP_ORDER[bid.trump]
+  return "kind" in bid
+    ? MISERE_BID_STRENGTH
+    : bid.level * 10 + TRUMP_ORDER[bid.trump]
 }
 
 export function nextSeat(seat: Seat): Seat {
@@ -80,6 +110,38 @@ export function nextSeat(seat: Seat): Seat {
 
 export function otherSeats(seat: Seat | null): Seat[] {
   return ([0, 1, 2] as Seat[]).filter((item) => item !== seat)
+}
+
+/**
+ * Минимальный срез раздачи для правил одиночного виста: годится и для
+ * полного RoundState, и для публичного RoundView (нужен и на клиенте).
+ */
+export type SoloWhistView = Pick<
+  RoundState,
+  "contract" | "phase" | "declarer" | "whist"
+>
+
+/**
+ * Одиночный вист: один защитник вистует, другой пасует.
+ * Вистующий играет в открытую и ходит за себя и за пасующего — возвращаем его место.
+ */
+export function soloWhistController(round: SoloWhistView): Seat | null {
+  if (round.contract?.kind !== "game") return null
+  if (round.phase !== "play" && round.phase !== "scored") return null
+  const defenders = otherSeats(round.declarer)
+  const controller = defenders.find((seat) => round.whist[seat] === true)
+  const passer = defenders.find((seat) => round.whist[seat] === false)
+  return controller !== undefined && passer !== undefined ? controller : null
+}
+
+/** Пасующий при одиночном висте: его картами ходит вистующий. */
+export function soloWhistPartner(
+  round: SoloWhistView,
+  controller: Seat,
+): Seat {
+  return (
+    otherSeats(round.declarer).find((seat) => seat !== controller) ?? controller
+  )
 }
 
 export function createRound(params: { seed: number; dealer: Seat }): RoundState {
@@ -96,6 +158,8 @@ export function createRound(params: { seed: number; dealer: Seat }): RoundState 
     declarer: null,
     contract: null,
     discard: [],
+    prikupAck: [],
+    trickAck: [],
     whist: [null, null, null],
     trick: [],
     tricks: [0, 0, 0],
@@ -107,11 +171,13 @@ export function trumpOf(state: RoundState): Trump {
   return state.contract?.kind === "game" ? state.contract.trump : "NT"
 }
 
-/** Кто берёт взятку: старший козырь, иначе старшая карта масти хода. */
+/** Кто берёт взятку: старший козырь, иначе старшая карта масти хода.
+ *  Заходящая карта прикупа (распасы) в сравнении не участвует. */
 export function trickWinner(trick: TrickCard[], trump: Trump): Seat {
   const ledSuit = suitOf(trick[0].card)
-  let best = trick[0]
-  for (const item of trick.slice(1)) {
+  const contenders = trick.filter((item) => !item.fromPrikup)
+  let best = contenders[0]
+  for (const item of contenders.slice(1)) {
     if (
       cardStrength(item.card, ledSuit, trump) >
       cardStrength(best.card, ledSuit, trump)
@@ -154,8 +220,14 @@ export function applyAction(state: RoundState, action: RoundAction): ActionResul
   switch (action.type) {
     case "bid":
       return applyBid(state, action)
+    case "misere":
+      return applyMisere(state, action)
     case "pass":
       return applyPass(state, action)
+    case "prikup-ack":
+      return applyPrikupAck(state, action)
+    case "trick-ack":
+      return applyTrickAck(state, action)
     case "declare":
       return applyDeclare(state, action)
     case "whist":
@@ -176,9 +248,6 @@ function applyBid(
   if (action.level < MIN_LEVEL || action.level > MAX_LEVEL) {
     return fail(`Заказ — от ${MIN_LEVEL} до ${MAX_LEVEL} взяток`)
   }
-  if (action.trump === "NT") {
-    return fail("Без козыря не заказывают — в торговле только масти")
-  }
 
   const bid: Bid = { level: action.level, trump: action.trump }
   if (state.highest && bidStrength(bid) <= bidStrength(state.highest.bid)) {
@@ -190,6 +259,43 @@ function applyBid(
   next.highest = { seat: action.seat, bid }
 
   // Все, кроме заказавшего, спасовали — он играет.
+  if (otherSeats(action.seat).every((seat) => next.bids[seat] === "pass")) {
+    return { ok: true, state: startDeclaring(next) }
+  }
+
+  next.turn = nextBiddingSeat(next.bids, action.seat)
+  return { ok: true, state: next }
+}
+
+/**
+ * Заявка «мизер» в торговле: старше всех девяток, младше десятой игры.
+ * Если мизер пережил торговлю — играющий садится за свои десять карт сразу:
+ * ни прикупа, ни сноса, ни вистов.
+ */
+function applyMisere(
+  state: RoundState,
+  action: Extract<RoundAction, { type: "misere" }>,
+): ActionResult {
+  if (state.phase !== "bidding") return fail("Торговля уже закончилась")
+  if (state.turn !== action.seat) return fail("Сейчас не ваш ход")
+  if (state.bids[action.seat] === "pass") return fail("Вы уже спасовали")
+
+  const highest = state.highest
+  if (highest) {
+    if ("kind" in highest.bid) {
+      return fail("Мизер уже заявлен")
+    }
+    if (highest.bid.level !== MIN_LEVEL) {
+      return fail("Мизер нельзя заявить поверх заказа выше шестёрки")
+    }
+  }
+
+  const next = structuredClone(state)
+  next.bids[action.seat] = { kind: "misere" }
+  next.highest = { seat: action.seat, bid: { kind: "misere" } }
+
+  // Все, кроме заявившего, спасовали — прикуп открывается, играющий
+  // сносит две карты и играет мизер.
   if (otherSeats(action.seat).every((seat) => next.bids[seat] === "pass")) {
     return { ok: true, state: startDeclaring(next) }
   }
@@ -213,16 +319,21 @@ function applyPass(
   if (highest) {
     const others = otherSeats(highest.seat)
     if (others.every((seat) => next.bids[seat] === "pass")) {
+      // Торговля выиграна: прикуп открывается, дальше играющий сносит
+      // и объявляет контракт (заявленный мизер — только мизер).
       return { ok: true, state: startDeclaring(next) }
     }
     next.turn = nextBiddingSeat(next.bids, action.seat)
     return { ok: true, state: next }
   }
 
-  // Заказов не было: если спасовали все трое — распасы.
+  // Заказов не было: если спасовали все трое — распасы. Карты прикупа
+  // заходят в первых двух взятках: первая открыта на сукне сразу,
+  // докладывают по кругу начиная с первой руки.
   if (next.bids.every((entry) => entry === "pass")) {
     next.phase = "play"
     next.contract = { kind: "raspas" }
+    next.trick = [{ seat: next.dealer, card: next.prikup[0], fromPrikup: true }]
     next.turn = nextSeat(next.dealer)
     return { ok: true, state: next }
   }
@@ -239,7 +350,24 @@ function startDeclaring(state: RoundState): RoundState {
   next.phase = "declaring"
   next.turn = declarer
   next.discard = []
+  // Прикуп открыт на столе: снос откроется, когда посмотрят все трое.
+  next.prikupAck = []
   return next
+}
+
+/** Ок на открытый прикуп: порядок свободный, снос ждёт последнего подтверждения. */
+function applyPrikupAck(
+  state: RoundState,
+  action: Extract<RoundAction, { type: "prikup-ack" }>,
+): ActionResult {
+  if (state.phase !== "declaring") return fail("Прикуп ещё не открыт")
+  if (state.prikupAck.includes(action.seat)) {
+    return fail("Прикуп ты уже посмотрел")
+  }
+
+  const next = structuredClone(state)
+  next.prikupAck = [...next.prikupAck, action.seat]
+  return { ok: true, state: next }
 }
 
 function applyDeclare(
@@ -258,8 +386,17 @@ function applyDeclare(
 
   const highest = state.highest
   if (!highest) return fail("Не было заказа")
-  if (action.contract === "misere" && highest.bid.level !== MIN_LEVEL) {
+  const ordered = "kind" in highest.bid ? null : highest.bid
+  if ("kind" in highest.bid) {
+    // Мизер заявлен в торговле: прикуп уже открыт, отказаться нельзя.
+    if (action.contract !== "misere") {
+      return fail("Мизер заявлен в торговле — играется только мизер")
+    }
+  } else if (action.contract === "misere" && highest.bid.level !== MIN_LEVEL) {
     return fail("Мизер объявляют только при заказе шестой игры")
+  }
+  if (state.prikupAck.length < PLAYER_COUNT) {
+    return fail("Снос будет, когда прикуп посмотрят все трое")
   }
 
   const next = structuredClone(state)
@@ -274,14 +411,42 @@ function applyDeclare(
     return { ok: true, state: next }
   }
 
-  next.contract = {
-    kind: "game",
-    level: highest.bid.level,
-    trump: highest.bid.trump,
+  // Игра попадает в эту ветку только с игровой заявкой: мизер из торговли
+  // выше играется только мизером.
+  if (!ordered) {
+    return fail("Мизер из торговли играется без прикупа")
   }
+  // После прикупа заказ оставляют или поднимают выше — понижать нельзя.
+  const final = raisedGameContract(ordered, action)
+  if (typeof final === "string") return fail(final)
+  next.contract = { kind: "game", level: final.level, trump: final.trump }
   next.phase = "whist"
   next.turn = otherSeats(action.seat)[0]
   return { ok: true, state: next }
+}
+
+/**
+ * Контракт игры после прикупа: заявленную игру оставляют как есть либо
+ * поднимают — уровнем вверх или той же мастью старше. Понижение и смена
+ * на более слабую масть запрещены: такой заказ отклоняется.
+ */
+function raisedGameContract(
+  ordered: { level: number; trump: Trump },
+  action: Extract<RoundAction, { type: "declare" }>,
+): { level: number; trump: Trump } | string {
+  const level = action.level ?? ordered.level
+  const trump = action.trump ?? ordered.trump
+  if (!Number.isInteger(level) || level < MIN_LEVEL || level > MAX_LEVEL) {
+    return `Заказ — от ${MIN_LEVEL} до ${MAX_LEVEL} взяток`
+  }
+  if (!(TRUMPS as readonly string[]).includes(trump)) {
+    return "Неизвестная масть заказа"
+  }
+  const raised = { level, trump }
+  if (bidStrength(raised) < bidStrength(ordered)) {
+    return "Игру оставляют заказанной или поднимают выше"
+  }
+  return raised
 }
 
 function applyWhist(
@@ -313,23 +478,53 @@ function applyPlay(
   action: Extract<RoundAction, { type: "play" }>,
 ): ActionResult {
   if (state.phase !== "play") return fail("Сейчас не время ходить картой")
-  if (state.turn !== action.seat) return fail("Сейчас не ваш ход")
+  if (
+    state.trick.length === 0 &&
+    state.history.length > 0 &&
+    state.trickAck.length < PLAYER_COUNT
+  ) {
+    return fail("Сначала все смотрят собранную взятку")
+  }
 
-  const hand = state.hands[action.seat]
+  // Одиночный вист: вистующий ходит за себя и за пасующего.
+  // Сам пасующий карты не играет — его рукой управляет вистующий.
+  let playsFor: Seat
+  const controller = soloWhistController(state)
+  if (controller !== null) {
+    const partner = soloWhistPartner(state, controller)
+    if (state.turn === partner) {
+      if (action.seat !== controller) {
+        return fail("Ходы за пасующего делает вистующий")
+      }
+      playsFor = partner
+    } else if (state.turn === action.seat) {
+      playsFor = action.seat
+    } else {
+      return fail("Сейчас не ваш ход")
+    }
+  } else {
+    if (state.turn !== action.seat) return fail("Сейчас не ваш ход")
+    playsFor = action.seat
+  }
+
+  const hand = state.hands[playsFor]
   if (!hand.includes(action.card)) return fail("Этой карты нет в руке")
 
-  const legal = legalMoves(state, action.seat)
+  const legal = legalMoves(state, playsFor)
   if (!legal.includes(action.card)) {
     const led = state.trick[0]
     return fail(`Надо ходить в масть: ${led ? suitOf(led.card) : ""}`)
   }
 
   const next = structuredClone(state)
-  next.hands[action.seat] = hand.filter((card) => card !== action.card)
-  next.trick = [...state.trick, { seat: action.seat, card: action.card }]
+  next.hands[playsFor] = hand.filter((card) => card !== action.card)
+  next.trick = [...state.trick, { seat: playsFor, card: action.card }]
 
-  if (next.trick.length < PLAYER_COUNT) {
-    next.turn = nextSeat(action.seat)
+  // В первых двух взятках распасов на сукне лежит и заходящая карта
+  // прикупа — взятку собирают карты трёх игроков.
+  const played = next.trick.filter((item) => !item.fromPrikup).length
+  if (played < PLAYER_COUNT) {
+    next.turn = nextSeat(playsFor)
     return { ok: true, state: next }
   }
 
@@ -338,13 +533,51 @@ function applyPlay(
   next.history = [...state.history, { cards: next.trick, winner }]
   next.trick = []
 
-  if (next.history.length === TRICKS_PER_ROUND) {
-    next.phase = "scored"
-    next.turn = null
-    return { ok: true, state: next }
+  // Любая взятка, включая десятую, остаётся на сукне до Ок от всех:
+  // ход победителя (или запись раздачи) открывается последним Ок.
+  next.trickAck = []
+  next.turn = null
+  return { ok: true, state: next }
+}
+
+/** Ок на собранную взятку: последний Ок передаёт ход победителю. */
+function applyTrickAck(
+  state: RoundState,
+  action: Extract<RoundAction, { type: "trick-ack" }>,
+): ActionResult {
+  if (state.phase !== "play") return fail("Сейчас не время смотреть взятку")
+  if (!state.history.length) return fail("Взятку ещё не собрали")
+  if (state.trick.length > 0) return fail("Взятка ещё собирается")
+  if (state.trickAck.length >= PLAYER_COUNT) {
+    return fail("Взятку уже все посмотрели")
+  }
+  if (state.trickAck.includes(action.seat)) {
+    return fail("Взятку ты уже посмотрел")
   }
 
-  next.turn = winner
+  const next = structuredClone(state)
+  next.trickAck = [...next.trickAck, action.seat]
+  if (next.trickAck.length >= PLAYER_COUNT) {
+    // Десятую взятку посмотрели — пора записывать раздачу.
+    if (next.history.length === TRICKS_PER_ROUND) {
+      next.phase = "scored"
+      next.turn = null
+      return { ok: true, state: next }
+    }
+    const last = next.history.at(-1)
+    if (last) {
+      if (next.contract?.kind === "raspas" && next.history.length === 1) {
+        // Вторая взятка распасов тоже заходит картой прикупа,
+        // доклады — снова начиная с первой руки.
+        next.trick = [
+          { seat: next.dealer, card: next.prikup[1], fromPrikup: true },
+        ]
+        next.turn = nextSeat(next.dealer)
+      } else {
+        next.turn = last.winner
+      }
+    }
+  }
   return { ok: true, state: next }
 }
 

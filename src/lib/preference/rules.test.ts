@@ -89,7 +89,7 @@ test("свои цифры меняют расчёт пули и вистов", (
       whisters: [0] as Seat[],
     }),
   )
-  assert.equal(single.table.entries[0].whists, 4, "один вистующий — по своей ставке")
+  assert.equal(single.table.entries[0].whists, 8, "один вистующий — за себя и за пасующего: 4 взятки с двух рук по своей ставке")
 
   const failed = applyRoundScore(
     createScoreTable(30, rules),
