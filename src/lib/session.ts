@@ -5,6 +5,9 @@ import { signSessionToken, verifySessionToken } from "./session-token"
 
 export { SESSION_COOKIE }
 
+/** Печенье с запомненным именем игрока (пишет клиент, см. lib/nickname-store). */
+const NICKNAME_COOKIE = "pf_nickname"
+
 const SESSION_MAX_AGE = 60 * 60 * 24 * 365
 
 function cookieIsSecure(): boolean {
@@ -15,6 +18,16 @@ function cookieIsSecure(): boolean {
 export async function getSessionUserId(): Promise<string | null> {
   const store = await cookies()
   return verifySessionToken(store.get(SESSION_COOKIE)?.value)
+}
+
+/** Запомненное имя из печенья — для подстановки в формы входа на сервере. */
+export async function readNicknameCookie(): Promise<string> {
+  const raw = (await cookies()).get(NICKNAME_COOKIE)?.value ?? ""
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 /** Запоминает игрока в браузере (вызывать только из Route Handler). */

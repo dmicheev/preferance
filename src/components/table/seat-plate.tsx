@@ -61,6 +61,9 @@ export type SeatPlateProps = {
   playState?: { text: string; tone: "game" | "whist" | "pass" } | null
 }
 
+/** Открытую руку соперника раскладываем рядами по столько карт — в размер с сукном. */
+const OPEN_CARDS_PER_ROW = 5
+
 export function SeatPlate({
   position,
   nickname,
@@ -107,32 +110,45 @@ export function SeatPlate({
       data-empty={empty}
     >
       {openCards && openCards.length > 0 ? (
-        <div className="seat__backs seat__backs--open" aria-hidden={!onOpenCardClick}>
-          {openCards.map((card, index) => {
-            const offset = index - (openCards.length - 1) / 2
-            const face = (
-              <PlayingCard
-                card={toCardModel(card)}
-                size="xs"
-                style={deckStyle(offset * 9, Math.abs(offset) * 1.6)}
-              />
-            )
-            return onOpenCardClick ? (
-              <button
-                key={card}
-                type="button"
-                className="seat__open-card"
-                title="ход картой пасующего"
-                onClick={() => onOpenCardClick(card)}
-              >
-                {face}
-              </button>
-            ) : (
-              <div key={card} className="seat__open-card">
-                {face}
+        <div className="seat__hand" aria-hidden={!onOpenCardClick}>
+          {Array.from(
+            { length: Math.ceil(openCards.length / OPEN_CARDS_PER_ROW) },
+            (_, row) => (
+              <div className="seat__hand-row" key={row}>
+                {openCards
+                  .slice(row * OPEN_CARDS_PER_ROW, (row + 1) * OPEN_CARDS_PER_ROW)
+                  .map((card, index) => {
+                    const rowCards = Math.min(
+                      OPEN_CARDS_PER_ROW,
+                      openCards.length - row * OPEN_CARDS_PER_ROW,
+                    )
+                    const offset = index - (rowCards - 1) / 2
+                    const face = (
+                      <PlayingCard
+                        card={toCardModel(card)}
+                        size="sm"
+                        style={deckStyle(offset * 8, Math.abs(offset) * 1.2)}
+                      />
+                    )
+                    return onOpenCardClick ? (
+                      <button
+                        key={card}
+                        type="button"
+                        className="seat__open-card"
+                        title="ход картой пасующего"
+                        onClick={() => onOpenCardClick(card)}
+                      >
+                        {face}
+                      </button>
+                    ) : (
+                      <div key={card} className="seat__open-card">
+                        {face}
+                      </div>
+                    )
+                  })}
               </div>
-            )
-          })}
+            ),
+          )}
         </div>
       ) : backs > 0 ? (
         <div className="seat__backs" aria-hidden="true">

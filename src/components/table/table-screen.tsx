@@ -18,6 +18,7 @@ import type {
   RoomState,
   RoundResultView,
 } from "@/lib/protocol"
+import { useVoiceChat } from "@/lib/use-voice-chat"
 import { getGameSocket, type GameSocket } from "@/lib/socket-client"
 
 import { ChatDock } from "./chat-dock"
@@ -33,9 +34,11 @@ type TableScreenProps = {
   view: GameView
   /** Адрес приглашения, собранный на сервере. */
   inviteUrl: string
+  /** Запомненное имя из печенья — для подстановки в форму входа. */
+  storedNickname?: string
 }
 
-export function TableScreen({ view, inviteUrl }: TableScreenProps) {
+export function TableScreen({ view, inviteUrl, storedNickname = "" }: TableScreenProps) {
   const [room, setRoom] = useState<RoomState | null>(null)
   const [messages, setMessages] = useState<ChatMessageView[]>(view.chat)
   const [chatBase, setChatBase] = useState<ChatMessageView[]>(view.chat)
@@ -160,6 +163,8 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
     (text: string) => emitGame((socket) => socket.emit("chat:send", { text })),
     [emitGame],
   )
+
+  const { voice, joinVoice, leaveVoice, toggleMic, toggleDeafen } = useVoiceChat()
 
   const startGame = useCallback(
     () => emitGame((socket) => socket.emit("game:start", {})),
@@ -690,10 +695,19 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
         error={chatError ?? roomError}
         disabled={!myUserId}
         onSend={sendChat}
+        voice={voice}
+        onVoiceJoin={joinVoice}
+        onVoiceLeave={leaveVoice}
+        onVoiceToggleMic={toggleMic}
+        onVoiceToggleDeafen={toggleDeafen}
       />
 
       {game?.status === "FINISHED" ? (
-        <ResultVeil standings={game.standings} players={game.players} />
+        <ResultVeil
+          gameKey={game.key}
+          standings={game.standings}
+          players={game.players}
+        />
       ) : null}
 
       {!myUserId ? (
@@ -701,6 +715,7 @@ export function TableScreen({ view, inviteUrl }: TableScreenProps) {
           gameKey={view.key}
           settings={view.settings}
           seatsTaken={view.seats.length}
+          storedNickname={storedNickname}
         />
       ) : null}
     </div>

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useState, type FormEvent } from "react"
 
+import { rememberNickname } from "@/lib/nickname-store"
 import { settingsSummary } from "@/lib/format"
 import { rulesetSummary } from "@/lib/preference/score"
 import { NICKNAME_MAX_LENGTH, type GameSettingsView } from "@/lib/protocol"
@@ -12,11 +13,15 @@ type JoinVeilProps = {
   gameKey: string
   settings: GameSettingsView
   seatsTaken: number
+  /** Запомненное имя из печенья: приходит с сервера, сразу видно в поле. */
+  storedNickname?: string
 }
 
-export function JoinVeil({ gameKey, settings, seatsTaken }: JoinVeilProps) {
+export function JoinVeil({ gameKey, settings, seatsTaken, storedNickname = "" }: JoinVeilProps) {
   const router = useRouter()
-  const [nickname, setNickname] = useState("")
+  const [nicknameEdit, setNicknameEdit] = useState<string | null>(null)
+  // Пока юзер не начал печатать — показываем запомненное имя.
+  const nickname = nicknameEdit ?? storedNickname
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,7 +55,7 @@ export function JoinVeil({ gameKey, settings, seatsTaken }: JoinVeilProps) {
         return
       }
 
-      window.localStorage.setItem("pf:nickname", value)
+      rememberNickname(value)
       router.refresh()
     } catch {
       setError("Сеть подвела — попробуй ещё раз")
@@ -83,7 +88,7 @@ export function JoinVeil({ gameKey, settings, seatsTaken }: JoinVeilProps) {
             <input
               className="input"
               value={nickname}
-              onChange={(event) => setNickname(event.target.value)}
+              onChange={(event) => setNicknameEdit(event.target.value)}
               maxLength={NICKNAME_MAX_LENGTH}
               placeholder="Богдан"
               autoFocus

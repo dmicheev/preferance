@@ -1,9 +1,11 @@
 "use client"
 
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState, useSyncExternalStore, type FormEvent } from "react"
 
 import { Candle } from "@/components/candle"
+import { readNickname, rememberNickname } from "@/lib/nickname-store"
 import { DEFAULT_RULESET, type Ruleset } from "@/lib/preference/rules"
 import { NICKNAME_MAX_LENGTH } from "@/lib/protocol"
 import {
@@ -17,16 +19,6 @@ import {
 
 import { RulesDialog, RulesTrigger } from "./rules-dialog"
 
-const subscribeNothing = () => () => {}
-
-function readStoredNickname(): string {
-  try {
-    return window.localStorage.getItem("pf:nickname") ?? ""
-  } catch {
-    return ""
-  }
-}
-
 const ROUNDS_LABEL: Record<string, string> = {
   "10": "10",
   "20": "20",
@@ -34,14 +26,16 @@ const ROUNDS_LABEL: Record<string, string> = {
   null: "∞",
 }
 
+const subscribeNothing = () => () => {}
+
 export function Hall() {
   const router = useRouter()
 
   // Ник из прошлого визита читаем без эффектов: сервер отдаёт пустую строку,
-  // клиент подхватывает сохранённое значение после гидратации.
+  // клиент подхватывает сохранённое значение (печенье) после гидратации.
   const storedNickname = useSyncExternalStore(
     subscribeNothing,
-    readStoredNickname,
+    readNickname,
     () => "",
   )
   const [nicknameEdit, setNicknameEdit] = useState<string | null>(null)
@@ -62,11 +56,7 @@ export function Hall() {
   const [joinError, setJoinError] = useState<string | null>(null)
 
   const remember = (value: string) => {
-    try {
-      window.localStorage.setItem("pf:nickname", value)
-    } catch {
-      // приватный режим — не страшно
-    }
+    rememberNickname(value)
   }
 
   const createTable = async (event: FormEvent<HTMLFormElement>) => {
@@ -305,6 +295,17 @@ export function Hall() {
               {joinBusy ? "Заходим…" : "Сесть за стол"}
             </button>
           </form>
+        </section>
+
+        <section className="panel panel--wide">
+          <h2 className="panel__title">История партий</h2>
+          <p className="panel__hint">
+            каждая закрытая партия под спудом: торговля, снос, все взятки и расчёт
+            любой раздачи
+          </p>
+          <Link className="button button--ghost" href="/history">
+            Открыть историю
+          </Link>
         </section>
       </div>
 

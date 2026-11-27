@@ -52,3 +52,6 @@ next-env.d.ts
 .claude/
 .windsurf/
 skills-lock.json
+
+# Самоподписанный TLS-сертификат сервера
+certs/

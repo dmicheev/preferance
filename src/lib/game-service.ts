@@ -12,6 +12,7 @@ import {
   type GameView,
   type HallSeatView,
   type RoomState,
+  type RoundResultView,
   type SeatView,
 } from "./protocol"
 import { DEFAULT_RULESET, normalizeRuleset, type Ruleset } from "./preference/rules"
@@ -423,6 +424,176 @@ export async function getGameStandings(
       score: result.score,
     }))
     .sort((left, right) => left.place - right.place)
+}
+
+// ---------- история партий ----------
+
+/**
+ * Запись раздачи в историю партии. Вызывается после каждой записанной раздачи,
+ * повторная запись той же раздачи (дубли события) просто перезаписывает строку.
+ */
+export async function saveRoundRecord(
+  key: string,
+  result: RoundResultView,
+): Promise<void> {
+  const game = await prisma.game.findUnique({
+    where: { key },
+    select: { id: true },
+  })
+  if (!game) return
+
+  await prisma.gameRound.upsert({
+    where: { gameId_roundNumber: { gameId: game.id, roundNumber: result.roundNumber } },
+    update: { data: result as unknown as Prisma.InputJsonValue },
+    create: {
+      gameId: game.id,
+      roundNumber: result.roundNumber,
+      data: result as unknown as Prisma.InputJsonValue,
+    },
+  })
+}
+
+/** Разбор JSON из БД: битая запись не должна ронять страницу истории. */
+function parseRoundRecord(value: unknown): RoundResultView | null {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "roundNumber" in value &&
+    "outcome" in value &&
+    "table" in value
+  ) {
+    return value as RoundResultView
+  }
+  return null
+}
+
+export type HistoryEntryView = {
+  key: string
+  status: GameStatusId
+  settings: GameSettingsView
+  createdAt: number
+  finishedAt: number | null
+  players: HallSeatView[]
+  roundsCount: number
+  /** Итоги, если партия закрыта. */
+  results: Array<{ seat: number; nickname: string; place: number; score: number }> | null
+}
+
+/** Последние партии с раздачами или итогами — для списка истории. */
+export async function listGameHistories(limit = 40): Promise<HistoryEntryView[]> {
+  const games = await prisma.game.findMany({
+    where: {
+      status: "FINISHED",
+      OR: [{ rounds: { some: {} } }, { results: { some: {} } }],
+    },
+    orderBy: [{ finishedAt: "desc" }, { updatedAt: "desc" }],
+    take: limit,
+    include: {
+      players: {
+        include: { user: { select: { id: true, nickname: true } } },
+        orderBy: { seat: "asc" },
+      },
+      _count: { select: { rounds: true } },
+      results: { orderBy: { place: "asc" } },
+    },
+  })
+
+  return games.map((game) => {
+    const players: HallSeatView[] = game.players.map((player) => ({
+      userId: player.user.id,
+      nickname: player.user.nickname,
+      seat: player.seat,
+      isHost: player.isHost,
+      isBot: player.isBot,
+      botLevel: player.botLevel,
+    }))
+    const nicknameByUserId = new Map(
+      players.map((player) => [player.userId, player.nickname]),
+    )
+
+    return {
+      key: game.key,
+      status: game.status as GameStatusId,
+      settings: toSettingsView(game),
+      createdAt: game.createdAt.getTime(),
+      finishedAt: game.finishedAt?.getTime() ?? null,
+      players,
+      roundsCount: game._count.rounds,
+      results:
+        game.status === "FINISHED" && game.results.length > 0
+          ? game.results.map((result) => ({
+              seat: game.players.find((p) => p.userId === result.userId)?.seat ?? 0,
+              nickname: nicknameByUserId.get(result.userId) ?? "—",
+              place: result.place,
+              score: result.score,
+            }))
+          : null,
+    }
+  })
+}
+
+export type GameHistoryView = {
+  key: string
+  status: GameStatusId
+  settings: GameSettingsView
+  createdAt: number
+  finishedAt: number | null
+  players: HallSeatView[]
+  /** Раздачи по порядку: торговля, ходы и расчёт каждой. */
+  rounds: RoundResultView[]
+  results: HistoryEntryView["results"]
+}
+
+/** Вся история одной партии: состав, раздачи с ходами и итоги. */
+export async function getGameHistory(
+  key: string,
+): Promise<GameHistoryView | null> {
+  const game = await prisma.game.findUnique({
+    where: { key },
+    include: {
+      players: {
+        include: { user: { select: { id: true, nickname: true } } },
+        orderBy: { seat: "asc" },
+      },
+      rounds: { orderBy: { roundNumber: "asc" } },
+      results: { orderBy: { place: "asc" } },
+    },
+  })
+  if (!game) return null
+
+  const players: HallSeatView[] = game.players.map((player) => ({
+    userId: player.user.id,
+    nickname: player.user.nickname,
+    seat: player.seat,
+    isHost: player.isHost,
+    isBot: player.isBot,
+    botLevel: player.botLevel,
+  }))
+  const nicknameByUserId = new Map(
+    players.map((player) => [player.userId, player.nickname]),
+  )
+  const rounds = game.rounds
+    .map((record) => parseRoundRecord(record.data))
+    .filter((record): record is RoundResultView => record !== null)
+
+  return {
+    key: game.key,
+    status: game.status as GameStatusId,
+    settings: toSettingsView(game),
+    createdAt: game.createdAt.getTime(),
+    finishedAt: game.finishedAt?.getTime() ?? null,
+    players,
+    rounds,
+    results:
+      game.status === "FINISHED" && game.results.length > 0
+        ? game.results.map((result) => ({
+            seat: game.players.find((p) => p.userId === result.userId)?.seat ?? 0,
+            nickname: nicknameByUserId.get(result.userId) ?? "—",
+            place: result.place,
+            score: result.score,
+          }))
+        : null,
+  }
 }
 
 export function buildRoomState(

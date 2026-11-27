@@ -9,6 +9,7 @@ import {
   PLAYER_COUNT,
 } from "@/lib/preference/constants"
 import { TRUMPS, type Trump } from "@/lib/preference/cards"
+import { roundCalculation } from "@/lib/preference/round-explain"
 
 /** В торговле заказывают масти и без козыря — полный ряд заказа. */
 const BID_TRUMPS = TRUMPS
@@ -642,6 +643,17 @@ function ResultSummary({
           )
         })}
       </ul>
+      {/* Расчёт цифр: почему именно столько ушло в таблицу. */}
+      <details className="hist__details">
+        <summary>как считали</summary>
+        <ul className="hist__lines">
+          {roundCalculation(result, (seat) => nicknameOf(seat)).map((line, index) => (
+            <li key={index} className="hist__line">
+              {line}
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   )
 }

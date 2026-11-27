@@ -345,7 +345,17 @@ function absorb(
 
   const result: RoundResultView = {
     roundNumber: roundsPlayed,
+    dealer: round.dealer,
     outcome,
+    // Полная запись раздачи для истории: торговля, прикуп, снос, вист, взятки.
+    bids: [...round.bids],
+    prikup: [...round.prikup],
+    discard: [...round.discard],
+    whist: [...round.whist],
+    trickList: round.history.map((entry) => ({
+      cards: entry.cards.map((card) => ({ ...card })),
+      winner: entry.winner,
+    })),
     deltas: scored.deltas,
     table: scored.table,
     finished: next.status === "FINISHED",

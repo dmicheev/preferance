@@ -68,6 +68,29 @@ export const chatTextSchema = z
   .min(1, { message: "Пустое сообщение" })
   .max(CHAT_MAX_LENGTH, { message: `Не длиннее ${CHAT_MAX_LENGTH} символов` })
 
+/**
+ * Сигналинг голоса сервер не понимает — только проверяет форму и пересылает.
+ * SDP и ICE-кандидат приходят упакованными, чтобы отличать их друг от друга.
+ */
+export const voiceSignalSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("desc"),
+    description: z.object({
+      type: z.enum(["offer", "answer", "pranswer", "rollback"]),
+      sdp: z.string().min(1).max(64_000),
+    }),
+  }),
+  z.object({
+    kind: z.literal("ice"),
+    candidate: z.object({
+      candidate: z.string().max(2_000),
+      sdpMid: z.string().max(64).nullable().optional(),
+      sdpMLineIndex: z.number().int().min(0).max(64).nullable().optional(),
+      usernameFragment: z.string().max(64).nullable().optional(),
+    }),
+  }),
+])
+
 export const rulesetSchema = z.object({
   gameValues: z
     .object({

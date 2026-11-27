@@ -7,11 +7,12 @@ import {
   buildRoomState,
   findViewerContext,
   getGameStandings,
-  markGamePlaying,
-  saveChatMessage,
-  saveGameOutcome,
-  type ViewerContext,
-} from "../lib/game-service"
+   markGamePlaying,
+   saveChatMessage,
+   saveGameOutcome,
+   saveRoundRecord,
+   type ViewerContext,
+ } from "../lib/game-service"
 import { finalStandings } from "../lib/preference/score"
 import {
   SESSION_COOKIE,
@@ -19,10 +20,15 @@ import {
   type GameSnapshot,
   type GameStatusId,
   type ServerToClientEvents,
+  type VoicePeerView,
 } from "../lib/protocol"
 import { normalizeBotLevel } from "../lib/preference/bot"
 import { verifySessionToken } from "../lib/session-token"
-import { chatTextSchema, normalizeGameKey } from "../lib/validation"
+import {
+  chatTextSchema,
+  normalizeGameKey,
+  voiceSignalSchema,
+} from "../lib/validation"
 import {
   applyUserProposal,
   buildSnapshot,
@@ -38,6 +44,7 @@ import {
   stopBotTimer,
   type BotCommand,
 } from "./bot-scheduler"
+import { forgetTableTalk, scheduleTableTalk } from "./table-talk"
 
 type InterServerEvents = Record<string, never>
 
@@ -47,6 +54,9 @@ type SocketData = {
   nickname: string | null
   recentMessages: number[]
 }
+
+/** Голосующий за столом: кто и от какого сокета. */
+type VoicePeer = { userId: string; nickname: string }
 
 const ROOM_PREFIX = "game:"
 const CHAT_RATE_LIMIT = { messages: 6, windowMs: 6000 }
@@ -110,6 +120,8 @@ export function attachSocketServer(httpServer: HttpServer) {
   const roomLocks = new Map<string, Promise<unknown>>()
   // key → таймер уборки опустевшего стола
   const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  // key → socketId → голосующий: WebRTC-стол, сервер только раздаёт состав и ретранслирует сигналы
+  const voicePeers = new Map<string, Map<string, VoicePeer>>()
 
   /**
    * Строгая сериализация переходов стола. Мутация «прочитал → применил → сохранил»
@@ -144,8 +156,10 @@ export function attachSocketServer(httpServer: HttpServer) {
       cleanupTimers.delete(key)
       stopBotTimer(key)
       dropSession(key)
+      forgetTableTalk(key)
       roomContexts.delete(key)
       presence.delete(key)
+      voicePeers.delete(key)
     }, ROOM_TTL_MS)
     // Не держим процесс живым ради уборки.
     ;(timer as { unref?: () => void }).unref?.()
@@ -194,6 +208,27 @@ export function attachSocketServer(httpServer: HttpServer) {
       users.delete(userId)
     }
     if (users.size === 0) presence.delete(key)
+  }
+
+  function voicePeerViews(key: string): VoicePeerView[] {
+    const roster = voicePeers.get(key)
+    if (!roster) return []
+    return Array.from(roster, ([socketId, peer]) => ({ socketId, ...peer }))
+  }
+
+  /** Состав голоса слышат все за столом: и сидящие в нём, и решающие, присоединяться ли. */
+  function broadcastVoice(key: string) {
+    io.to(roomName(key)).emit("voice:peers", { peers: voicePeerViews(key) })
+  }
+
+  /** Убирает сокет из голосового состава стола и объявляет об этом. */
+  function leaveVoice(socket: { data: { key: string | null }; id: string }) {
+    const key = socket.data.key
+    if (!key) return
+    const roster = voicePeers.get(key)
+    if (!roster?.delete(socket.id)) return
+    if (roster.size === 0) voicePeers.delete(key)
+    broadcastVoice(key)
   }
 
   function snapshotFor(key: string, userId: string): GameSnapshot | null {
@@ -291,6 +326,12 @@ export function attachSocketServer(httpServer: HttpServer) {
     }
     if (applied.outcome.result) {
       io.to(roomName(key)).emit("game:round-result", applied.outcome.result)
+      // Раздача записана — сохраняем её в историю партии (ходы и расчёт).
+      try {
+        await saveRoundRecord(key, applied.outcome.result)
+      } catch (error) {
+        console.error("[game] не удалось записать раздачу в историю", error)
+      }
     }
 
     await persistOutcome(key, before.status, applied.outcome.session)
@@ -299,6 +340,15 @@ export function attachSocketServer(httpServer: HttpServer) {
     // Ход за ботом — таймер на ответ. Под локом состояние совпадает с сохранённым,
     // но читаем заново: дешевле гонки с «устаревшим снапшотом до рассылки».
     scheduleBotTurn(key, getSession(key) ?? applied.outcome.session, runBot)
+
+    // Расклад под фольклорную реплику: компьютер изредка отпускает её в чат.
+    scheduleTableTalk({
+      key,
+      session: applied.outcome.session,
+      actions: applied.outcome.actions,
+      result: applied.outcome.result,
+      say: (message) => io.to(roomName(key)).emit("chat:new", message),
+    })
     return true
   }
 
@@ -420,6 +470,8 @@ export function attachSocketServer(httpServer: HttpServer) {
         }
 
         if (socket.data.key && socket.data.key !== key) {
+          // Уходя на другой стол, выходим и из голосового состава старого.
+          leaveVoice(socket)
           await socket.leave(roomName(socket.data.key))
           removePresence(socket.data.key, socket.data.userId)
           broadcastState(socket.data.key)
@@ -474,6 +526,9 @@ export function attachSocketServer(httpServer: HttpServer) {
       try {
         const key = normalizeGameKey(String(payload?.key ?? ""))
         if (!key || socket.data.key !== key) return
+        // Состав голоса объявляем, пока сокет ещё числится в комнате стола;
+        // leaveVoice читает socket.data.key, поэтому идёт до обнуления.
+        leaveVoice(socket)
         socket.data.key = null
         socket.data.nickname = null
         await socket.leave(roomName(key))
@@ -528,6 +583,40 @@ export function attachSocketServer(httpServer: HttpServer) {
         console.error("[chat] не удалось сохранить сообщение", error)
         socket.emit("chat:error", { message: "Сообщение не отправилось" })
       }
+    })
+
+    // --- голос: WebRTC-стол, сервер только ведёт состав и ретранслирует сигналы ---
+
+    socket.on("voice:join", () => {
+      const key = socket.data.key
+      const nickname = socket.data.nickname
+      if (!key || !nickname) {
+        socket.emit("voice:error", { message: "Сначала сядь за стол" })
+        return
+      }
+
+      const roster = voicePeers.get(key) ?? new Map<string, VoicePeer>()
+      roster.set(socket.id, { userId: socket.data.userId, nickname })
+      voicePeers.set(key, roster)
+      broadcastVoice(key)
+    })
+
+    socket.on("voice:leave", () => leaveVoice(socket))
+
+    socket.on("voice:signal", (payload) => {
+      const key = socket.data.key
+      if (!key) return
+
+      const to = String(payload?.to ?? "")
+      const parsed = voiceSignalSchema.safeParse(payload?.data)
+      if (!to || !parsed.success) return
+
+      // Адресат должен быть в голосовом составе того же стола: чужие сокеты
+      // и сокеты других столов в ретрансляцию не попадают.
+      const roster = voicePeers.get(key)
+      if (!roster?.has(to)) return
+
+      io.to(to).emit("voice:signal", { from: socket.id, data: parsed.data })
     })
 
     socket.on("game:start", async () => {
@@ -864,6 +953,7 @@ export function attachSocketServer(httpServer: HttpServer) {
     socket.on("disconnect", () => {
       const key = socket.data.key
       if (!key) return
+      leaveVoice(socket)
       removePresence(key, socket.data.userId)
       broadcastState(key)
       // Стол опустел — держим его в памяти ограниченное время (TTL),

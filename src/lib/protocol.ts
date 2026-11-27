@@ -77,6 +77,28 @@ export type SendChatPayload = { text: string }
 export type ChatErrorPayload = { message: string }
 export type RoomErrorPayload = { message: string }
 
+/** Участник голосового стола: один сокет = одна «гарнитура». */
+export type VoicePeerView = {
+  socketId: string
+  userId: string
+  nickname: string
+}
+
+/**
+ * Ретранслируемые данные сигналинга: SDP-описание или ICE-кандидат.
+ * Сервер содержимое не разбирает — только доставляет адресату.
+ */
+export type VoiceSignalData =
+  | { kind: "desc"; description: RTCSessionDescriptionInit }
+  | { kind: "ice"; candidate: RTCIceCandidateInit }
+
+export type VoiceJoinPayload = Record<string, never>
+export type VoiceLeavePayload = Record<string, never>
+export type VoiceSignalPayload = { to: string; data: VoiceSignalData }
+export type VoiceSignalFromPayload = { from: string; data: VoiceSignalData }
+export type VoicePeersPayload = { peers: VoicePeerView[] }
+export type VoiceErrorPayload = { message: string }
+
 /** Игрок сеанса: место и роль в текущей партии. */
 export type GamePlayerView = {
   seat: Seat
@@ -171,12 +193,23 @@ export type GameActionView =
 /** Итог раздачи: контракт, взятки и что записано в таблицу. */
 export type RoundResultView = {
   roundNumber: number
+  dealer: Seat
   outcome: {
     contract: Contract
     declarer: Seat | null
     tricks: number[]
     whisters: Seat[]
   }
+  /** Торговля: заявка, пас или null — по местам. */
+  bids: (Bid | "pass" | null)[]
+  /** Прикуп: две карты, доставшиеся играющему (на распасах — заход в взятки). */
+  prikup: Card[]
+  /** Снос играющего после прикупа (на мизере из торговли — пусто). */
+  discard: Card[]
+  /** Решения по висту: true — вистует, false — пас, null — не спрашивали. */
+  whist: (boolean | null)[]
+  /** Все взятки по порядку: карты на сукне и кто взял. */
+  trickList: CompletedTrick[]
   deltas: ScoreEntry[]
   table: ScoreTable
   finished: boolean
@@ -217,6 +250,9 @@ export type ClientToServerEvents = {
   "game:ready": (payload: GameReadyPayload) => void
   "game:bot-seat": (payload: GameBotSeatPayload) => void
   "game:bot-remove": (payload: GameBotRemovePayload) => void
+  "voice:join": (payload: VoiceJoinPayload) => void
+  "voice:leave": (payload: VoiceLeavePayload) => void
+  "voice:signal": (payload: VoiceSignalPayload) => void
 }
 
 export type ServerToClientEvents = {
@@ -229,6 +265,9 @@ export type ServerToClientEvents = {
   "game:dealt": (payload: { roundNumber: number; dealer: Seat }) => void
   "game:round-result": (payload: RoundResultView) => void
   "game:error": (payload: RoomErrorPayload) => void
+  "voice:peers": (payload: VoicePeersPayload) => void
+  "voice:signal": (payload: VoiceSignalFromPayload) => void
+  "voice:error": (payload: VoiceErrorPayload) => void
 }
 
 /** Сколько человеческих мест за столом: 3 играющих, четвёртый — сдающий по кругу. */

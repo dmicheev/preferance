@@ -59,6 +59,7 @@ model Game {
   players  GamePlayer[]
   messages ChatMessage[]
   results  GameResult[]
+  rounds   GameRound[]
 
   @@index([status])
 }
@@ -94,6 +95,20 @@ model ChatMessage {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([gameId, createdAt])
+}
+
+model GameRound {
+  id          String   @id @default(cuid())
+  gameId      String
+  roundNumber Int
+  // Полная запись раздачи: торговля, прикуп, снос, вист, все взятки и расчёт.
+  // Структура — RoundResultView из src/lib/protocol.ts.
+  data        Json
+  createdAt   DateTime @default(now())
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, roundNumber])
 }
 
 model GameResult {

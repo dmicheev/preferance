@@ -6,7 +6,7 @@ import { Candle } from "@/components/candle"
 import { MissingTable } from "@/components/table/missing-table"
 import { TableScreen } from "@/components/table/table-screen"
 import { getGameView } from "@/lib/game-service"
-import { getSessionUserId } from "@/lib/session"
+import { getSessionUserId, readNicknameCookie } from "@/lib/session"
 import { normalizeGameKey } from "@/lib/validation"
 
 type TablePageProps = {
@@ -29,9 +29,10 @@ async function TableRoute({ params }: TablePageProps) {
   const { key } = await params
   const keyParam = normalizeGameKey(key)
 
-  const [sessionUserId, headerList] = await Promise.all([
+  const [sessionUserId, headerList, storedNickname] = await Promise.all([
     getSessionUserId(),
     headers(),
+    readNicknameCookie(),
   ])
 
   const view = await getGameView(keyParam, sessionUserId)
@@ -55,6 +56,7 @@ async function TableRoute({ params }: TablePageProps) {
     <TableScreen
       view={view}
       inviteUrl={`${proto}://${host}/g/${view.key}`}
+      storedNickname={storedNickname}
     />
   )
 }

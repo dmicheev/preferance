@@ -1260,13 +1260,30 @@ button {
   margin-left: 0;
 }
 
-/* Открытые карты (мизер, одиночный вист): веер шире, чтобы был читаем угол карты. */
-.seat__backs--open > * {
-  margin-left: -10px;
+/* Открытые руки соперников (мизер, одиночный вист): карты в один размер
+   с сукном (62px), веером в два ряда по 5 — иначе руки не разобрать. */
+.seat__hand {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
 }
 
-.seat__backs--open > *:first-child {
+.seat__hand-row {
+  display: flex;
+}
+
+.seat__hand-row > * {
+  margin-left: -30px;
+}
+
+.seat__hand-row > *:first-child {
   margin-left: 0;
+}
+
+.seat__hand .card {
+  --card-w: 62px;
+  height: calc(var(--card-w) * 1.42);
+  box-shadow: 0 10px 20px -10px rgba(0, 0, 0, 0.85);
 }
 
 /* Кликабельная карта пасующего: кнопка без собственной рамки. */
@@ -1706,10 +1723,9 @@ button.seat__open-card:focus-visible .card {
 }
 
 .dock__voice {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 11px 14px;
+  display: grid;
+  gap: 8px;
+  padding: 11px 14px 13px;
   border-top: 1px solid rgba(201, 168, 106, 0.12);
   color: var(--text-3);
   font-size: 0.76rem;
@@ -1718,6 +1734,133 @@ button.seat__open-card:focus-visible .card {
 .dock__voice b {
   color: var(--text-2);
   font-weight: 500;
+}
+
+.voice__head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.voice__controls {
+  display: flex;
+  gap: 6px;
+}
+
+.voice__button {
+  padding: 7px 11px;
+  border: 1px solid rgba(201, 168, 106, 0.24);
+  border-radius: var(--radius-md);
+  background: rgba(201, 168, 106, 0.1);
+  color: var(--brass-3);
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: background 160ms ease;
+}
+
+.voice__button:hover:not(:disabled) {
+  background: rgba(201, 168, 106, 0.22);
+}
+
+.voice__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.voice__button[aria-pressed="true"] {
+  color: var(--text-3);
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.voice__button--join {
+  justify-self: start;
+  color: #a8dcc0;
+  border-color: rgba(168, 220, 192, 0.3);
+  background: rgba(168, 220, 192, 0.08);
+}
+
+.voice__button--join:hover:not(:disabled) {
+  background: rgba(168, 220, 192, 0.16);
+}
+
+.voice__button--leave {
+  flex: none;
+  width: 32px;
+  padding: 7px 0;
+  color: #e08a7a;
+  border-color: rgba(224, 138, 122, 0.3);
+  background: rgba(224, 138, 122, 0.08);
+}
+
+.voice__button--leave:hover:not(:disabled) {
+  background: rgba(224, 138, 122, 0.18);
+}
+
+.voice__peers {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.voice__peer {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  color: var(--text-2);
+}
+
+.voice__peer.is-connecting {
+  opacity: 0.55;
+}
+
+.voice__peer.is-speaking {
+  color: #a8dcc0;
+}
+
+.voice__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(201, 168, 106, 0.35);
+}
+
+.voice__peer.is-speaking .voice__dot {
+  background: #7fd6a4;
+  box-shadow: 0 0 7px rgba(127, 214, 164, 0.9);
+  animation: voicePulse 1.1s ease-in-out infinite;
+}
+
+.voice__status {
+  margin-left: auto;
+  font-size: 0.66rem;
+  color: var(--text-3);
+}
+
+.voice__hint {
+  margin: 0;
+  font-style: italic;
+  color: var(--text-3);
+}
+
+.voice__error {
+  margin: 0;
+  color: #e08a7a;
+}
+
+@keyframes voicePulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.6);
+  }
 }
 
 /* ---------- оверлей подключения ---------- */
@@ -1892,6 +2035,15 @@ button.seat__open-card:focus-visible .card {
   .seat__backs {
     height: 38px;
   }
+
+  /* открытые руки соперников — мельче, чтобы ряды влезали у бортов */
+  .seat__hand .card {
+    --card-w: 48px;
+  }
+
+  .seat__hand-row > * {
+    margin-left: -22px;
+  }
 }
 
 @media (max-width: 680px) {
@@ -1916,6 +2068,14 @@ button.seat__open-card:focus-visible .card {
 
   .seat {
     width: 116px;
+  }
+
+  .seat__hand .card {
+    --card-w: 44px;
+  }
+
+  .seat__hand-row > * {
+    margin-left: -20px;
   }
 
   .card {
@@ -2381,4 +2541,279 @@ button.seat__open-card:focus-visible .card {
     bottom: clamp(140px, 18vh, 190px);
     padding: 11px 14px 13px;
   }
+}
+/* ---------- история партий: финальный экран и страницы архива ---------- */
+
+/* широкая панель на всю сетку зала */
+.panel--wide {
+  grid-column: 1 / -1;
+}
+
+/* финальный экран партии: карточка шире и с внутренним скроллом */
+.veil__card--result {
+  width: min(640px, 100%);
+  max-height: min(86dvh, 860px);
+  overflow-y: auto;
+}
+
+.veil__actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+/* формула счёта под ником: «пуля 20 − гора 14 + висты 22 = 28» */
+.hist__formula {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.hist__label {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(201, 168, 106, 0.75);
+}
+
+.hist__nav {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+/* список закрытых партий */
+.hist__list {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hist__entry {
+  display: grid;
+  gap: 4px;
+  padding: 12px 16px;
+  border: 1px solid rgba(201, 168, 106, 0.16);
+  border-radius: var(--radius-md);
+  background: rgba(201, 168, 106, 0.05);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 180ms ease, background 180ms ease;
+}
+
+.hist__entry:hover {
+  border-color: rgba(201, 168, 106, 0.45);
+  background: rgba(201, 168, 106, 0.1);
+}
+
+.hist__entry-main {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-family: var(--display);
+  color: var(--text-1);
+}
+
+.hist__entry-main span {
+  font-family: inherit;
+  font-weight: 400;
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+
+.hist__entry-players {
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+
+.hist__entry-scores {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.hist__entry-scores span[data-place="1"] {
+  color: #f0dfae;
+}
+
+.hist__entry-meta {
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+/* раздача в истории */
+.hist__final {
+  margin: 14px 0 4px;
+}
+
+.hist__round {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(201, 168, 106, 0.16);
+  border-radius: var(--radius-md);
+  background: rgba(9, 14, 13, 0.55);
+}
+
+.hist__round-title {
+  margin: 0 0 10px;
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 400;
+  color: #f2e2bc;
+}
+
+.hist__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 22px;
+  align-items: start;
+}
+
+.hist__cards {
+  display: flex;
+  margin-top: 6px;
+}
+
+.hist__cards .card + .card {
+  margin-left: -12px;
+}
+
+.hist__lines {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.84rem;
+  color: var(--text-2);
+}
+
+.hist__line b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.hist__details {
+  margin-top: 12px;
+}
+
+.hist__details summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(201, 168, 106, 0.85);
+  user-select: none;
+}
+
+.hist__details summary:hover {
+  color: #f0dfae;
+}
+
+/* взятки: карты по игрокам, победитель подсвечен */
+.hist__tricks {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hist__trick {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid rgba(139, 129, 114, 0.18);
+  border-radius: var(--radius-md, 10px);
+  background: rgba(20, 28, 25, 0.6);
+}
+
+.hist__trick-num {
+  width: 26px;
+  font-family: var(--display);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.hist__trick-card {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  opacity: 0.82;
+}
+
+.hist__trick-card[data-winner="true"] {
+  opacity: 1;
+}
+
+.hist__trick-card[data-winner="true"] .card__face {
+  box-shadow:
+    inset 0 0 0 1px rgba(120, 96, 60, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 0 0 2px rgba(239, 220, 176, 0.55),
+    0 10px 20px -12px rgba(0, 0, 0, 0.85);
+}
+
+.hist__trick-name {
+  font-size: 0.66rem;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.hist__trick-winner {
+  margin-left: auto;
+  font-size: 0.76rem;
+  color: #f0dfae;
+}
+
+/* расчёт раздачи */
+.hist__calc {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(139, 129, 114, 0.3);
+}
+
+.hist__deltas {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+}
+
+.hist__deltas li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.hist__deltas b {
+  color: var(--text-1);
+}
+
+.hist__deltas span {
+  color: var(--text-3);
+}
+
+/* компактный список раздач внутри финального экрана */
+.hist__rounds-compact {
+  margin-top: 10px;
+}
+
+.hist__rounds-compact .hist__calc {
+  margin-top: 8px;
 }
